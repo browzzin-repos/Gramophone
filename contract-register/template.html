@@ -1,0 +1,488 @@
+<title>2XU Contract Register</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
+<style>
+/* Layout: macOS-style split view — sidebar / content / inspector; collapses to a single column with a sheet on phones. */
+:root{
+  --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", "Helvetica Neue", Arial, sans-serif;
+  --font-display: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Inter", "Helvetica Neue", Arial, sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --bg: #f5f5f7;
+  --sidebar: rgba(236,236,240,.82);
+  --surface: #ffffff;
+  --surface-2: #fbfbfd;
+  --fill: rgba(118,118,128,.12);
+  --fill-2: rgba(118,118,128,.08);
+  --sep: rgba(60,60,67,.14);
+  --label: #1d1d1f;
+  --label-2: rgba(60,60,67,.72);
+  --label-3: rgba(60,60,67,.46);
+  --accent: #007aff;
+  --accent-soft: rgba(0,122,255,.1);
+  --red: #ff3b30; --red-soft: rgba(255,59,48,.12);
+  --orange: #ff9500; --orange-soft: rgba(255,149,0,.14);
+  --yellow: #c79400; --yellow-soft: rgba(255,204,0,.18);
+  --green: #28a745; --green-soft: rgba(52,199,89,.14);
+  --indigo: #5856d6; --indigo-soft: rgba(88,86,214,.12);
+  --gray-soft: rgba(142,142,147,.16);
+  --shadow: 0 1px 2px rgba(0,0,0,.04), 0 8px 24px rgba(0,0,0,.06);
+  --r-lg: 14px; --r-md: 10px; --r-sm: 7px;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#000000; --sidebar:rgba(30,30,32,.86); --surface:#1c1c1e; --surface-2:#232325;
+  --fill:rgba(118,118,128,.24); --fill-2:rgba(118,118,128,.16); --sep:rgba(84,84,88,.6);
+  --label:#f5f5f7; --label-2:rgba(235,235,245,.68); --label-3:rgba(235,235,245,.4);
+  --accent:#0a84ff; --accent-soft:rgba(10,132,255,.18);
+  --red:#ff453a; --red-soft:rgba(255,69,58,.2); --orange:#ff9f0a; --orange-soft:rgba(255,159,10,.2);
+  --yellow:#ffd60a; --yellow-soft:rgba(255,214,10,.16); --green:#30d158; --green-soft:rgba(48,209,88,.18);
+  --indigo:#5e5ce6; --indigo-soft:rgba(94,92,230,.22); --gray-soft:rgba(142,142,147,.24);
+  --shadow:0 0 0 1px rgba(255,255,255,.04), 0 8px 24px rgba(0,0,0,.4); color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#000000; --sidebar:rgba(30,30,32,.86); --surface:#1c1c1e; --surface-2:#232325;
+  --fill:rgba(118,118,128,.24); --fill-2:rgba(118,118,128,.16); --sep:rgba(84,84,88,.6);
+  --label:#f5f5f7; --label-2:rgba(235,235,245,.68); --label-3:rgba(235,235,245,.4);
+  --accent:#0a84ff; --accent-soft:rgba(10,132,255,.18);
+  --red:#ff453a; --red-soft:rgba(255,69,58,.2); --orange:#ff9f0a; --orange-soft:rgba(255,159,10,.2);
+  --yellow:#ffd60a; --yellow-soft:rgba(255,214,10,.16); --green:#30d158; --green-soft:rgba(48,209,88,.18);
+  --indigo:#5e5ce6; --indigo-soft:rgba(94,92,230,.22); --gray-soft:rgba(142,142,147,.24);
+  --shadow:0 0 0 1px rgba(255,255,255,.04), 0 8px 24px rgba(0,0,0,.4); color-scheme:dark}
+
+*{box-sizing:border-box}
+html,body{height:100%}
+body{background:var(--bg);color:var(--label);font:14px/1.42 var(--font);-webkit-font-smoothing:antialiased;letter-spacing:-.005em}
+button{font:inherit;color:inherit}
+:focus-visible{outline:3px solid var(--accent-soft);outline-offset:1px;box-shadow:0 0 0 1px var(--accent)}
+.num{font-variant-numeric:tabular-nums}
+
+.app{display:grid;grid-template-columns:232px minmax(0,1fr);height:100%}
+.app.has-inspector{grid-template-columns:232px minmax(0,1fr) 400px}
+
+/* Sidebar */
+.sidebar{background:var(--sidebar);backdrop-filter:saturate(180%) blur(20px);-webkit-backdrop-filter:saturate(180%) blur(20px);
+  border-right:1px solid var(--sep);padding:18px 10px;overflow:auto;display:flex;flex-direction:column;gap:18px}
+.brand{display:flex;align-items:center;gap:10px;padding:2px 10px 4px}
+.brand-mark{width:28px;height:28px;border-radius:7px;background:var(--label);color:var(--bg);display:grid;place-items:center;font:700 11px/1 var(--font-display);letter-spacing:.02em}
+.brand b{font:600 14px var(--font-display);display:block}
+.brand span{font-size:11px;color:var(--label-2)}
+.side-group{display:flex;flex-direction:column;gap:1px}
+.side-title{font-size:11px;font-weight:600;color:var(--label-3);padding:0 10px 4px;letter-spacing:.02em}
+.side-item{display:flex;align-items:center;gap:9px;padding:6px 10px;border-radius:var(--r-sm);border:0;background:none;text-align:left;cursor:default;width:100%}
+.side-item:hover{background:var(--fill-2)}
+.side-item[aria-current="true"]{background:var(--fill)}
+.side-item svg{width:16px;height:16px;flex:none;color:var(--accent)}
+.side-item .count{margin-left:auto;font-size:12px;color:var(--label-3)}
+.side-item .count.alert{color:var(--red);font-weight:600}
+.side-foot{margin-top:auto;font-size:11px;color:var(--label-3);padding:0 10px;line-height:1.5}
+
+/* Main */
+.main{overflow:auto;min-width:0}
+.toolbar{position:sticky;top:env(safe-area-inset-top,0px);z-index:5;display:flex;align-items:center;gap:12px;
+  padding-block:12px;padding-left:max(28px,env(safe-area-inset-left,0px));padding-right:max(28px,env(safe-area-inset-right,0px));
+  background:color-mix(in srgb,var(--bg) 82%,transparent);backdrop-filter:saturate(180%) blur(20px);-webkit-backdrop-filter:saturate(180%) blur(20px);border-bottom:1px solid transparent}
+.toolbar.scrolled{border-bottom-color:var(--sep)}
+.toolbar h2{font:600 15px var(--font-display);margin:0;flex:1;opacity:0;transition:opacity .2s}
+.toolbar.scrolled h2{opacity:1}
+.search{display:flex;align-items:center;gap:6px;background:var(--fill-2);border-radius:var(--r-sm);padding:5px 9px;width:min(240px,45vw)}
+.search svg{width:14px;height:14px;color:var(--label-3);flex:none}
+.search input{border:0;background:none;outline:0;font:inherit;color:var(--label);width:100%}
+.seg{display:inline-flex;background:var(--fill-2);border-radius:8px;padding:2px}
+.seg button{border:0;background:none;padding:4px 12px;border-radius:6px;font-size:13px;font-weight:500;color:var(--label-2)}
+.seg button[aria-pressed="true"]{background:var(--surface);color:var(--label);box-shadow:0 1px 3px rgba(0,0,0,.12)}
+
+.content{padding-block:4px 48px;padding-left:max(28px,env(safe-area-inset-left,0px));padding-right:max(28px,env(safe-area-inset-right,0px));max-width:1180px;display:flex;flex-direction:column;gap:28px}
+.large-title{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;flex-wrap:wrap}
+.large-title h1{font:700 32px/1.1 var(--font-display);letter-spacing:-.02em;margin:0}
+.large-title p{margin:4px 0 0;color:var(--label-2)}
+.pilot-banner{display:flex;gap:10px;align-items:flex-start;background:var(--indigo-soft);border-radius:var(--r-md);padding:10px 14px;font-size:13px;color:var(--label)}
+.pilot-banner svg{width:16px;height:16px;color:var(--indigo);flex:none;margin-top:2px}
+
+.tiles{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
+.tile{background:var(--surface);border-radius:var(--r-lg);padding:14px 16px;box-shadow:var(--shadow);display:flex;flex-direction:column;gap:4px;min-width:0}
+.tile .k{font-size:12px;color:var(--label-2);font-weight:500}
+.tile .v{font:600 26px/1.15 var(--font-display);letter-spacing:-.02em}
+.tile .s{font-size:12px;color:var(--label-3)}
+.tile.alert .v{color:var(--red)}
+
+.section{display:flex;flex-direction:column;gap:8px;min-width:0}
+.section-head{display:flex;align-items:baseline;justify-content:space-between;padding:0 4px}
+.section-head h3{font:600 17px var(--font-display);margin:0;letter-spacing:-.01em}
+.section-head span{font-size:12px;color:var(--label-3)}
+
+/* Grouped inset list */
+.list{background:var(--surface);border-radius:var(--r-lg);box-shadow:var(--shadow);overflow:hidden}
+.row{display:grid;grid-template-columns:56px minmax(0,1fr) auto;gap:14px;align-items:center;padding:11px 16px;border:0;background:none;width:100%;text-align:left;position:relative;cursor:default}
+.row+.row::before{content:"";position:absolute;top:0;left:86px;right:0;border-top:1px solid var(--sep)}
+.row:hover{background:var(--fill-2)}
+.row[aria-current="true"]{background:var(--accent-soft)}
+.date-chip{width:56px;border-radius:9px;background:var(--fill-2);text-align:center;padding:5px 0 6px;line-height:1.05}
+.date-chip .m{font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:var(--red)}
+.date-chip .dd{font:600 20px var(--font-display)}
+.date-chip .y{font-size:10px;color:var(--label-3)}
+.row .t{font-weight:600;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.row .d{color:var(--label-2);font-size:13px;margin-top:1px}
+.row .r{text-align:right;display:flex;flex-direction:column;align-items:flex-end;gap:4px}
+.when{font-size:13px;font-weight:600}
+.when.red{color:var(--red)} .when.orange{color:var(--orange)} .when.gray{color:var(--label-3)}
+.chev{width:8px;height:13px;color:var(--label-3)}
+
+.pill{display:inline-flex;align-items:center;gap:5px;border-radius:999px;padding:2px 9px;font-size:11.5px;font-weight:600;white-space:nowrap}
+.pill i{width:6px;height:6px;border-radius:50%;background:currentColor}
+.pill.red{background:var(--red-soft);color:var(--red)}
+.pill.orange{background:var(--orange-soft);color:var(--orange)}
+.pill.yellow{background:var(--yellow-soft);color:var(--yellow)}
+.pill.green{background:var(--green-soft);color:var(--green)}
+.pill.indigo{background:var(--indigo-soft);color:var(--indigo)}
+.pill.gray{background:var(--gray-soft);color:var(--label-2)}
+.tag{font-size:11.5px;color:var(--label-2);background:var(--fill-2);border-radius:5px;padding:1px 7px;font-weight:500}
+
+/* Timeline */
+.timeline{background:var(--surface);border-radius:var(--r-lg);box-shadow:var(--shadow);padding:14px 16px 10px;overflow-x:auto}
+.tl-grid{min-width:640px;display:grid;grid-template-columns:150px minmax(0,1fr);row-gap:10px}
+.tl-months{position:relative;height:18px;font-size:11px;color:var(--label-3)}
+.tl-months span{position:absolute;top:0;transform:translateX(-50%)}
+.tl-name{font-weight:500;font-size:13px;align-self:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding-right:10px;border:0;background:none;text-align:left;cursor:default}
+.tl-track{position:relative;height:26px;border-radius:6px;background:repeating-linear-gradient(90deg,transparent 0 calc(100%/15 - 1px),var(--sep) calc(100%/15 - 1px) calc(100%/15))}
+.tl-bar{position:absolute;top:8px;height:10px;border-radius:5px;background:var(--accent-soft);border:1px solid color-mix(in srgb,var(--accent) 35%,transparent)}
+.tl-bar.ended{background:var(--gray-soft);border-color:transparent}
+.tl-mark{position:absolute;top:2px;width:3px;height:22px;border-radius:2px;transform:translateX(-1px)}
+.tl-mark.red{background:var(--red)} .tl-mark.orange{background:var(--orange)} .tl-mark.gray{background:var(--label-3)}
+.tl-today{position:absolute;top:-4px;bottom:-4px;width:0;border-left:1.5px dashed var(--red)}
+.tl-legend{display:flex;gap:16px;font-size:11.5px;color:var(--label-2);padding:10px 0 2px;flex-wrap:wrap}
+.tl-legend i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:5px;vertical-align:-1px}
+
+/* Table */
+.table-wrap{background:var(--surface);border-radius:var(--r-lg);box-shadow:var(--shadow);overflow-x:auto}
+table{width:100%;border-collapse:collapse;min-width:760px}
+th{font-size:11.5px;font-weight:600;color:var(--label-2);text-align:left;padding:9px 14px;border-bottom:1px solid var(--sep);background:var(--surface-2);white-space:nowrap;cursor:default;user-select:none}
+th[data-sort]:hover{color:var(--label)}
+th .arrow{color:var(--accent);margin-left:3px}
+td{padding:10px 14px;border-bottom:1px solid var(--sep);vertical-align:middle}
+tbody tr:last-child td{border-bottom:0}
+tbody tr{cursor:default}
+tbody tr:hover td{background:var(--fill-2)}
+tbody tr[aria-current="true"] td{background:var(--accent-soft)}
+td.cp b{display:block;font-weight:600}
+td.cp span{font-size:12px;color:var(--label-2)}
+td.right,th.right{text-align:right}
+
+/* Inspector */
+.inspector{border-left:1px solid var(--sep);background:var(--surface-2);overflow:auto;min-width:0}
+.insp-head{position:sticky;top:0;z-index:2;background:color-mix(in srgb,var(--surface-2) 88%,transparent);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);padding:16px 18px 12px;border-bottom:1px solid var(--sep);display:flex;gap:12px;align-items:flex-start}
+.insp-head h2{font:700 22px/1.15 var(--font-display);margin:0;letter-spacing:-.02em}
+.insp-head p{margin:3px 0 0;color:var(--label-2);font-size:12.5px}
+.close{margin-left:auto;border:0;background:var(--fill);width:26px;height:26px;border-radius:50%;display:grid;place-items:center;flex:none}
+.close svg{width:10px;height:10px}
+.insp-body{padding:14px 18px 40px;display:flex;flex-direction:column;gap:18px}
+.callout{border-radius:var(--r-md);padding:12px 14px;display:flex;gap:12px;align-items:center}
+.callout.red{background:var(--red-soft)} .callout.orange{background:var(--orange-soft)} .callout.gray{background:var(--fill-2)} .callout.green{background:var(--green-soft)}
+.callout .big{font:700 28px/1 var(--font-display);letter-spacing:-.02em;min-width:52px;text-align:center}
+.callout .big small{display:block;font:500 10.5px var(--font);letter-spacing:.02em;color:var(--label-2);margin-top:3px}
+.callout b{display:block}
+.callout span{font-size:12.5px;color:var(--label-2)}
+.group-title{font-size:11.5px;font-weight:600;color:var(--label-3);text-transform:uppercase;letter-spacing:.05em;padding:0 4px 6px}
+.kv{background:var(--surface);border-radius:var(--r-md);box-shadow:var(--shadow)}
+.kv div{display:grid;grid-template-columns:132px minmax(0,1fr);gap:10px;padding:9px 13px;font-size:13px}
+.kv div+div{border-top:1px solid var(--sep)}
+.kv dt{color:var(--label-2)}
+.kv dd{margin:0;min-width:0;overflow-wrap:anywhere}
+.risk{display:flex;gap:10px;padding:10px 13px;font-size:13px}
+.risk+.risk{border-top:1px solid var(--sep)}
+.sev{width:8px;height:8px;border-radius:50%;margin-top:6px;flex:none}
+.sev.high{background:var(--red)} .sev.medium{background:var(--orange)} .sev.low{background:var(--label-3)}
+.q{padding:10px 13px;font-size:12.5px}
+.q+.q{border-top:1px solid var(--sep)}
+.q blockquote{margin:0 0 4px;font-family:var(--mono);font-size:11.5px;line-height:1.5;color:var(--label);border-left:2px solid var(--accent);padding-left:9px}
+.q span{color:var(--label-3);font-size:11.5px}
+.doc{display:flex;gap:10px;align-items:center;padding:9px 13px;font-size:12.5px}
+.doc+.doc{border-top:1px solid var(--sep)}
+.doc svg{width:18px;height:22px;flex:none;color:var(--red)}
+.doc .n{min-width:0;overflow-wrap:anywhere;flex:1}
+.doc .n small{display:block;color:var(--label-3)}
+.prov{font-size:11.5px;color:var(--label-3);padding:0 4px;line-height:1.5}
+.empty{padding:40px;text-align:center;color:var(--label-3)}
+
+/* Phone */
+.mobile-nav{display:none}
+@media (max-width:1100px){
+  .app.has-inspector{grid-template-columns:232px minmax(0,1fr)}
+  .app.has-inspector .inspector{position:fixed;inset:0 0 0 auto;width:min(420px,100%);z-index:20;box-shadow:-10px 0 40px rgba(0,0,0,.18)}
+}
+@media (max-width:760px){
+  .app,.app.has-inspector{grid-template-columns:minmax(0,1fr)}
+  .sidebar{display:none}
+  .mobile-nav{display:flex;overflow-x:auto;gap:6px;padding-block:4px 0}
+  .mobile-nav button{border:0;background:var(--fill-2);border-radius:999px;padding:6px 13px;font-size:13px;font-weight:500;white-space:nowrap}
+  .mobile-nav button[aria-pressed="true"]{background:var(--label);color:var(--bg)}
+  .tiles{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .toolbar,.content{padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+  .large-title h1{font-size:28px}
+  .app.has-inspector .inspector{width:100%;top:env(safe-area-inset-top,0px)}
+  .kv div{grid-template-columns:110px minmax(0,1fr)}
+  .row{grid-template-columns:50px minmax(0,1fr)}
+  .row .r{grid-column:2;align-items:flex-start;flex-direction:row}
+  .row+.row::before{left:16px}
+  .date-chip{width:50px}
+}
+@media (prefers-reduced-motion:no-preference){
+  .inspector{animation:slide .22s ease-out}
+  @keyframes slide{from{transform:translateX(12px);opacity:.6}to{transform:none;opacity:1}}
+}
+</style>
+
+<div class="app" id="app">
+  <aside class="sidebar" aria-label="Navigation">
+    <div class="brand"><div class="brand-mark">2XU</div><div><b>Contracts</b><span>Finance register</span></div></div>
+    <nav class="side-group" id="nav-main"></nav>
+    <nav class="side-group" id="nav-cat"><div class="side-title">Categories</div></nav>
+    <div class="side-foot" id="side-foot"></div>
+  </aside>
+
+  <main class="main" id="main">
+    <div class="toolbar" id="toolbar">
+      <h2 id="toolbar-title">Overview</h2>
+      <label class="search" for="q"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="7" cy="7" r="5"/><path d="m11 11 3.5 3.5" stroke-linecap="round"/></svg><input id="q" type="search" placeholder="Search" autocomplete="off"></label>
+    </div>
+    <div class="content" id="content"></div>
+  </main>
+
+  <aside class="inspector" id="inspector" hidden aria-label="Contract details"></aside>
+</div>
+
+<script>
+const DATA = /*__REGISTER_DATA__*/null;
+
+const ICONS = {
+  overview:'<svg viewBox="0 0 16 16" fill="currentColor"><rect x="1" y="1" width="6" height="6" rx="1.6"/><rect x="9" y="1" width="6" height="6" rx="1.6" opacity=".55"/><rect x="1" y="9" width="6" height="6" rx="1.6" opacity=".55"/><rect x="9" y="9" width="6" height="6" rx="1.6"/></svg>',
+  all:'<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 1.8h5.5L13 5.3v8.4a.6.6 0 0 1-.6.6H4a.6.6 0 0 1-.6-.6V2.4a.6.6 0 0 1 .6-.6Z"/><path d="M9.3 1.8v3.6H13M5.8 8.5h4.6M5.8 11h3.4" stroke-linecap="round"/></svg>',
+  action:'<svg viewBox="0 0 16 16" fill="currentColor"><path d="M8 1.2 15.2 14H.8L8 1.2Z" opacity=".9"/><path d="M8 6v3.6" stroke="#fff" stroke-width="1.6" stroke-linecap="round"/><circle cx="8" cy="11.7" r=".9" fill="#fff"/></svg>',
+  calendar:'<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="1.8" y="2.8" width="12.4" height="11.4" rx="2"/><path d="M1.8 6.4h12.4M5 1.4v2.6M11 1.4v2.6" stroke-linecap="round"/></svg>',
+  folder:'<svg viewBox="0 0 16 16" fill="currentColor" opacity=".85"><path d="M1.5 4.2c0-.9.7-1.6 1.6-1.6h3l1.4 1.5h5.4c.9 0 1.6.7 1.6 1.6v6.6c0 .9-.7 1.6-1.6 1.6H3.1c-.9 0-1.6-.7-1.6-1.6V4.2Z"/></svg>',
+  pdf:'<svg viewBox="0 0 18 22" fill="none"><path d="M2 1h9.5L17 6.5V20a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1Z" fill="var(--surface)" stroke="var(--sep)"/><rect x="0" y="11" width="13" height="6" rx="1.5" fill="currentColor"/><text x="6.5" y="15.6" font-size="4.6" font-weight="700" fill="#fff" text-anchor="middle" font-family="-apple-system,Arial">PDF</text></svg>',
+  chev:'<svg class="chev" viewBox="0 0 8 13" fill="none" stroke="currentColor" stroke-width="2"><path d="m1.5 1.5 5 5-5 5" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  close:'<svg viewBox="0 0 10 10" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="m1.5 1.5 7 7m0-7-7 7"/></svg>',
+  info:'<svg viewBox="0 0 16 16" fill="currentColor"><circle cx="8" cy="8" r="7"/><path d="M8 7v4.2" stroke="#fff" stroke-width="1.6" stroke-linecap="round"/><circle cx="8" cy="4.8" r=".95" fill="#fff"/></svg>'
+};
+
+const contracts = DATA.contracts;
+const TODAY = new Date(DATA.generated + 'T00:00:00');
+const state = { view: 'overview', category: null, selected: null, q: '', sort: { key: 'deadline', dir: 1 } };
+
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const pd = s => s ? new Date(s + 'T00:00:00') : null;
+const fmtDate = s => s ? pd(s).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' }) : '—';
+const money = (v, cur) => v == null ? '—' : (cur === 'AUD' ? 'A$' : cur === 'USD' ? 'US$' : (cur || '') + ' ') + Math.round(v).toLocaleString('en-AU');
+const audK = v => v == null ? '—' : v >= 1e6 ? 'A$' + (v / 1e6).toFixed(2) + 'm' : 'A$' + Math.round(v / 1000).toLocaleString('en-AU') + 'k';
+const relDays = n => n === 0 ? 'Today' : n === 1 ? 'Tomorrow' : n < 0 ? `${-n} days ago` : n < 60 ? `In ${n} days` : `In ${Math.round(n / 30.4)} months`;
+const urgency = n => n == null ? 'gray' : n <= 45 ? 'red' : n <= 120 ? 'orange' : 'gray';
+const STATUS_PILL = { 'Act now': 'red', 'Term ended': 'red', 'Needs review': 'orange', 'Due soon': 'yellow', 'Active': 'green' };
+const RENEWAL_LABEL = { auto_renew: 'Auto-renews', option_to_extend: 'Option to extend', mutual_agreement: 'Renews by agreement', evergreen: 'Rolling', fixed_term: 'Fixed term', unclear: 'Unclear' };
+const pill = (txt, color) => `<span class="pill ${color}"><i></i>${esc(txt)}</span>`;
+const statusPill = c => pill(c.computed.status, STATUS_PILL[c.computed.status] || 'gray');
+
+function needsAction(c) { return ['Act now', 'Term ended', 'Needs review'].includes(c.computed.status) || c.risks.some(r => r.severity === 'high'); }
+function filtered() {
+  let list = contracts;
+  if (state.category) list = list.filter(c => c.category === state.category);
+  if (state.view === 'action') list = list.filter(needsAction);
+  if (state.q) {
+    const q = state.q.toLowerCase();
+    list = list.filter(c => [c.counterparty, c.counterparty_legal_entity, c.category, c.service_description, c.fee_summary, c.signed_for_2xu_by].join(' ').toLowerCase().includes(q));
+  }
+  return list;
+}
+
+/* ---------- sidebar ---------- */
+function renderNav() {
+  const actions = contracts.filter(needsAction).length;
+  const items = [
+    ['overview', 'Overview', ICONS.overview, ''],
+    ['all', 'All Contracts', ICONS.all, contracts.length],
+    ['action', 'Needs Action', ICONS.action, actions],
+    ['calendar', 'Renewal Calendar', ICONS.calendar, '']
+  ];
+  document.getElementById('nav-main').innerHTML = items.map(([id, label, icon, n]) =>
+    `<button class="side-item" data-view="${id}" aria-current="${state.view === id && !state.category}">${icon}<span>${label}</span><span class="count ${id === 'action' && n ? 'alert' : ''}">${n}</span></button>`).join('');
+  const cats = [...new Set(contracts.map(c => c.category))].sort();
+  document.getElementById('nav-cat').innerHTML = '<div class="side-title">Categories</div>' + cats.map(cat =>
+    `<button class="side-item" data-cat="${esc(cat)}" aria-current="${state.category === cat}">${ICONS.folder}<span>${esc(cat)}</span><span class="count">${contracts.filter(c => c.category === cat).length}</span></button>`).join('');
+  document.getElementById('side-foot').innerHTML = `Data as at ${fmtDate(DATA.generated)}<br>${contracts.length} counterparties · pilot`;
+}
+
+/* ---------- views ---------- */
+function header(title, sub) {
+  const views = [['overview', 'Overview'], ['all', 'All'], ['action', 'Needs Action'], ['calendar', 'Calendar']];
+  return `<div class="mobile-nav">${views.map(([v, l]) => `<button data-view="${v}" aria-pressed="${state.view === v}">${l}</button>`).join('')}</div>
+  <div class="large-title"><div><h1>${esc(title)}</h1><p>${sub}</p></div></div>`;
+}
+
+function upcomingDeadlines(list, horizonDays = 400) {
+  const out = [];
+  for (const c of list) for (const d of c.computed.deadlines) if (d.days >= -120 && d.days <= horizonDays) out.push({ c, d });
+  return out.sort((a, b) => a.d.days - b.d.days);
+}
+
+function deadlineRow({ c, d }) {
+  const dt = pd(d.date);
+  const tone = d.days < 0 ? 'gray' : urgency(d.days);
+  return `<button class="row" data-id="${c.id}" aria-current="${state.selected === c.id}">
+    <div class="date-chip"><div class="m" style="color:var(--${tone === 'gray' ? 'label-3' : tone})">${dt.toLocaleDateString('en-AU', { month: 'short' })}</div><div class="dd num">${dt.getDate()}</div><div class="y num">${dt.getFullYear()}</div></div>
+    <div style="min-width:0"><div class="t">${esc(c.counterparty)} <span class="tag">${esc(d.kind)}</span></div><div class="d">${esc(d.why)}</div></div>
+    <div class="r"><span class="when ${tone} num">${relDays(d.days)}</span>${statusPill(c)}</div>
+  </button>`;
+}
+
+function viewOverview() {
+  const list = filtered();
+  const totalAud = list.reduce((s, c) => s + (c.computed.annual_value_aud || 0), 0);
+  const in60 = list.filter(c => c.computed.next_deadline && c.computed.next_deadline.days <= 60).length;
+  const auto = list.filter(c => c.renewal_type === 'auto_renew').length;
+  const review = list.filter(c => ['Term ended', 'Needs review'].includes(c.computed.status)).length;
+  const dl = upcomingDeadlines(list).filter(x => x.d.days >= 0).slice(0, 8);
+  const lapsed = list.filter(c => c.computed.status === 'Term ended');
+  return header(state.category || 'Overview', `Renewal and notice dates across ${list.length} contracts, worked out from the signed documents.`) +
+  `<div class="pilot-banner">${ICONS.info}<div><b>Pilot.</b> Five supplier contracts from <span class="num">Accounts/Contracts/Suppliers</span>. Every date and fee links back to a quote in the source PDF; open a contract to see them.</div></div>
+  <div class="tiles">
+    <div class="tile"><div class="k">Annual commitments</div><div class="v num">${audK(totalAud)}</div><div class="s">AUD equivalent, ex GST</div></div>
+    <div class="tile ${in60 ? 'alert' : ''}"><div class="k">Deadlines in 60 days</div><div class="v num">${in60}</div><div class="s">notice, extension or exit</div></div>
+    <div class="tile"><div class="k">Auto-renewing</div><div class="v num">${auto}</div><div class="s">roll over unless cancelled</div></div>
+    <div class="tile ${review ? 'alert' : ''}"><div class="k">Term ended or unclear</div><div class="v num">${review}</div><div class="s">confirm what governs today</div></div>
+  </div>
+  <section class="section"><div class="section-head"><h3>Upcoming deadlines</h3><span>Next 13 months</span></div>
+    <div class="list">${dl.map(deadlineRow).join('') || '<div class="empty">No upcoming deadlines</div>'}</div></section>
+  ${lapsed.length ? `<section class="section"><div class="section-head"><h3>Term has ended</h3><span>No newer document on file</span></div>
+    <div class="list">${lapsed.map(c => deadlineRow({ c, d: c.computed.deadlines[c.computed.deadlines.length - 1] })).join('')}</div></section>` : ''}
+  <section class="section"><div class="section-head"><h3>Terms at a glance</h3><span>${fmtMonth(tlStart())} – ${fmtMonth(tlEnd())}</span></div>${timeline(list)}</section>`;
+}
+
+function tlStart() { return new Date(TODAY.getFullYear(), TODAY.getMonth() - 3, 1); }
+function tlEnd() { return new Date(TODAY.getFullYear(), TODAY.getMonth() + 12, 1); }
+function fmtMonth(d) { return d.toLocaleDateString('en-AU', { month: 'short', year: 'numeric' }); }
+function pct(date) { const s = tlStart(), e = tlEnd(); return Math.max(0, Math.min(100, (date - s) / (e - s) * 100)); }
+
+function timeline(list) {
+  const s = tlStart();
+  const months = [];
+  for (let i = 0; i < 15; i++) { const m = new Date(s.getFullYear(), s.getMonth() + i, 1); months.push(`<span style="left:${pct(m) + 100 / 30}%">${m.toLocaleDateString('en-AU', { month: 'short' })}${m.getMonth() === 0 ? ' ’' + String(m.getFullYear()).slice(2) : ''}</span>`); }
+  const rows = list.map(c => {
+    const st = pd(c.computed.current_term_start), en = pd(c.computed.current_term_end);
+    const bar = st && en ? `<div class="tl-bar ${c.computed.status === 'Term ended' ? 'ended' : ''}" style="left:${pct(st)}%;width:${Math.max(.6, pct(en) - pct(st))}%" title="Current term ${fmtDate(c.computed.current_term_start)} – ${fmtDate(c.computed.current_term_end)}"></div>` : '';
+    const marks = c.computed.deadlines.filter(d => d.kind !== 'Term ends').map(d => {
+      const p = pct(pd(d.date)); if (p <= 0 || p >= 100) return '';
+      return `<div class="tl-mark ${d.days < 0 ? 'gray' : urgency(d.days)}" style="left:${p}%" title="${esc(d.kind)} · ${fmtDate(d.date)}"></div>`;
+    }).join('');
+    return `<button class="tl-name" data-id="${c.id}">${esc(c.counterparty)}</button><div class="tl-track">${bar}${marks}<div class="tl-today" style="left:${pct(TODAY)}%"></div></div>`;
+  }).join('');
+  return `<div class="timeline"><div class="tl-grid"><div></div><div class="tl-months">${months.join('')}</div>${rows}</div>
+  <div class="tl-legend"><span><i style="background:var(--accent-soft);border:1px solid var(--accent)"></i>Current term</span><span><i style="background:var(--red)"></i>Deadline within 45 days</span><span><i style="background:var(--orange)"></i>Within 4 months</span><span><i style="border-left:2px dashed var(--red);border-radius:0;width:2px"></i>Today</span></div></div>`;
+}
+
+function sortValue(c, key) {
+  switch (key) {
+    case 'name': return c.counterparty.toLowerCase();
+    case 'value': return c.computed.annual_value_aud ?? -1;
+    case 'end': return c.computed.current_term_end || '9999';
+    case 'status': return c.computed.status;
+    default: return c.computed.next_deadline ? c.computed.next_deadline.days : 1e6;
+  }
+}
+
+function viewTable(title, sub) {
+  const list = [...filtered()].sort((a, b) => { const x = sortValue(a, state.sort.key), y = sortValue(b, state.sort.key); return (x > y ? 1 : x < y ? -1 : 0) * state.sort.dir; });
+  const th = (key, label, cls = '') => `<th class="${cls}" data-sort="${key}" aria-sort="${state.sort.key === key ? (state.sort.dir > 0 ? 'ascending' : 'descending') : 'none'}">${label}${state.sort.key === key ? `<span class="arrow">${state.sort.dir > 0 ? '▲' : '▼'}</span>` : ''}</th>`;
+  return header(title, sub) + `<div class="table-wrap"><table>
+    <thead><tr>${th('name', 'Counterparty')}${th('status', 'Status')}<th>Renewal</th>${th('deadline', 'Next deadline')}${th('end', 'Term ends')}${th('value', 'Annual value', 'right')}</tr></thead>
+    <tbody>${list.map(c => {
+      const n = c.computed.next_deadline;
+      return `<tr data-id="${c.id}" aria-current="${state.selected === c.id}" tabindex="0">
+        <td class="cp"><b>${esc(c.counterparty)}</b><span>${esc(c.category)}</span></td>
+        <td>${statusPill(c)}</td>
+        <td>${esc(RENEWAL_LABEL[c.renewal_type])}</td>
+        <td>${n ? `<span class="when ${urgency(n.days)} num">${fmtDate(n.date)}</span><div style="font-size:12px;color:var(--label-2)">${esc(n.kind)}</div>` : '<span style="color:var(--label-3)">—</span>'}</td>
+        <td class="num">${fmtDate(c.computed.current_term_end)}</td>
+        <td class="right num">${money(c.annual_value, c.currency)}${c.currency !== 'AUD' && c.computed.annual_value_aud ? `<div style="font-size:12px;color:var(--label-3)">≈ ${audK(c.computed.annual_value_aud)}</div>` : ''}</td>
+      </tr>`;
+    }).join('') || '<tr><td colspan="6" class="empty">No contracts match</td></tr>'}</tbody></table></div>`;
+}
+
+function viewCalendar() {
+  const all = upcomingDeadlines(filtered(), 800);
+  const byMonth = {};
+  for (const x of all) { const k = x.d.date.slice(0, 7); (byMonth[k] ||= []).push(x); }
+  return header('Renewal Calendar', 'Every notice, extension, exit and term-end date, by month.') +
+    Object.entries(byMonth).map(([k, xs]) => `<section class="section"><div class="section-head"><h3>${fmtMonth(pd(k + '-01'))}</h3><span>${xs.length} date${xs.length > 1 ? 's' : ''}</span></div><div class="list">${xs.map(deadlineRow).join('')}</div></section>`).join('');
+}
+
+/* ---------- inspector ---------- */
+function inspector(c) {
+  const n = c.computed.next_deadline;
+  const tone = c.computed.status === 'Term ended' ? 'red' : n ? urgency(n.days) : 'gray';
+  const callout = c.computed.status === 'Term ended'
+    ? `<div class="callout red"><div class="big">!<small>ENDED</small></div><div><b>Term ended ${fmtDate(c.computed.current_term_end)}</b><span>No newer signed document on file. Confirm what governs today.</span></div></div>`
+    : n ? `<div class="callout ${tone}"><div class="big num">${n.days}<small>DAYS</small></div><div><b>${esc(n.kind)} ${fmtDate(n.date)}</b><span>${esc(n.why)}</span></div></div>`
+    : `<div class="callout gray"><div class="big">–</div><div><b>No dated action</b><span>Nothing in the documents forces a decision date.</span></div></div>`;
+  const kv = rows => `<dl class="kv">${rows.filter(r => r[1] != null && r[1] !== '').map(([k, v]) => `<div><dt>${k}</dt><dd>${v}</dd></div>`).join('')}</dl>`;
+  return `<div class="insp-head"><div style="min-width:0"><h2>${esc(c.counterparty)}</h2><p>${esc(c.counterparty_legal_entity || '')}</p><div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap">${statusPill(c)}<span class="tag">${esc(c.category)}</span><span class="tag">${esc(RENEWAL_LABEL[c.renewal_type])}</span></div></div>
+    <button class="close" id="close" aria-label="Close details">${ICONS.close}</button></div>
+  <div class="insp-body">
+    ${callout}
+    <p style="margin:0;color:var(--label-2);font-size:13px">${esc(c.service_description)}</p>
+    <div><div class="group-title">Dates</div>${kv([
+      ['Signed for 2XU', esc(c.signed_for_2xu_by)],
+      ['Effective', fmtDate(c.effective_date)],
+      ['Current term', c.computed.current_term_start ? `${fmtDate(c.computed.current_term_start)} – ${fmtDate(c.computed.current_term_end)}` : '—'],
+      ['Renewal', esc(c.notice_clause_summary || RENEWAL_LABEL[c.renewal_type])],
+      ['Notice period', c.notice_period_days != null ? `${c.notice_period_days} days` : '<span style="color:var(--orange)">Not in documents</span>'],
+      ['Early exit', c.early_exit_summary ? `${esc(c.early_exit_summary)}${c.early_exit_deadline ? ` <b class="num">(by ${fmtDate(c.early_exit_deadline)})</b>` : ''}` : null],
+      ...c.computed.deadlines.map(d => [esc(d.kind), `<span class="num" style="color:var(--${d.days < 0 ? 'label-3' : urgency(d.days) === 'gray' ? 'label' : urgency(d.days)})">${fmtDate(d.date)}</span> <span style="color:var(--label-3)">· ${relDays(d.days)}</span>`])
+    ])}</div>
+    <div><div class="group-title">Commercials</div>${kv([
+      ['Annual value', `<b class="num">${money(c.annual_value, c.currency)}</b>${c.currency !== 'AUD' && c.computed.annual_value_aud ? ` <span style="color:var(--label-3)">≈ ${audK(c.computed.annual_value_aud)}</span>` : ''}`],
+      ['One-off fees', c.one_off_fees ? money(c.one_off_fees, c.currency) : null],
+      ['Fees', esc(c.fee_summary)],
+      ['Price at renewal', esc(c.price_change_on_renewal)],
+      ['Billing', esc([c.billing_frequency, c.payment_terms].filter(Boolean).join(' · '))],
+      ['Lock-in / exit', esc(c.lock_in_or_exit_costs)],
+      ['Online terms', c.incorporated_online_terms ? (c.incorporated_online_terms.startsWith('http') ? `<a href="${esc(c.incorporated_online_terms)}" target="_blank" rel="noopener" style="color:var(--accent)">${esc(c.incorporated_online_terms.replace(/^https?:\/\//, ''))}</a>` : esc(c.incorporated_online_terms)) : null]
+    ])}</div>
+    ${c.risks.length ? `<div><div class="group-title">Risks</div><div class="kv">${c.risks.map(r => `<div class="risk"><span class="sev ${r.severity}" title="${r.severity}"></span><span>${esc(r.issue)}</span></div>`).join('')}</div></div>` : ''}
+    ${c.open_questions.length ? `<div><div class="group-title">To confirm</div><div class="kv">${c.open_questions.map(q => `<div class="risk"><span class="sev low"></span><span>${esc(q)}</span></div>`).join('')}</div></div>` : ''}
+    <div><div class="group-title">Evidence</div><div class="kv">${c.evidence.map(e => `<div class="q"><blockquote>${esc(e.quote)}</blockquote><span>${esc(e.field.replace(/_/g, ' '))} · ${esc(e.file_name)}${e.page ? ` · p.${e.page}` : ''}</span></div>`).join('')}</div></div>
+    <div><div class="group-title">Documents</div><div class="kv">${c.documents.map(d => `<div class="doc">${ICONS.pdf}<div class="n">${esc(d.file_name)}<small>${esc(d.doc_type.replace(/_/g, ' '))}${d.document_date ? ' · ' + fmtDate(d.document_date) : ''}</small></div>${d.signed ? pill('Signed', 'green') : pill('Unsigned', 'gray')}</div>`).join('')}</div></div>
+    <div class="prov">${esc(c.extracted_by)} · confidence ${esc(c.confidence)}${c.computed.computed_notes.length ? '<br>' + c.computed.computed_notes.map(esc).join('<br>') : ''}<br>Folder: Accounts/Contracts/Suppliers/${esc(c.source_folder)}</div>
+  </div>`;
+}
+
+/* ---------- render ---------- */
+function render() {
+  renderNav();
+  const titles = { overview: 'Overview', all: 'All Contracts', action: 'Needs Action', calendar: 'Renewal Calendar' };
+  let html;
+  if (state.view === 'overview') html = viewOverview();
+  else if (state.view === 'calendar') html = viewCalendar();
+  else if (state.view === 'action') html = viewTable('Needs Action', 'Deadlines inside 45 days, ended terms, unclear renewals and high risks.');
+  else html = viewTable(state.category || 'All Contracts', 'Sorted by the next date someone has to act on. Click a column to re-sort.');
+  document.getElementById('content').innerHTML = html;
+  document.getElementById('toolbar-title').textContent = state.category || titles[state.view];
+  const insp = document.getElementById('inspector');
+  const c = contracts.find(x => x.id === state.selected);
+  insp.hidden = !c;
+  document.getElementById('app').classList.toggle('has-inspector', !!c);
+  if (c) insp.innerHTML = inspector(c);
+}
+
+document.addEventListener('click', e => {
+  const v = e.target.closest('[data-view]'); if (v) { state.view = v.dataset.view; state.category = null; render(); document.getElementById('main').scrollTop = 0; return; }
+  const cat = e.target.closest('[data-cat]'); if (cat) { state.category = cat.dataset.cat; state.view = 'all'; render(); return; }
+  const s = e.target.closest('th[data-sort]'); if (s) { const k = s.dataset.sort; state.sort = { key: k, dir: state.sort.key === k ? -state.sort.dir : 1 }; render(); return; }
+  if (e.target.closest('#close')) { state.selected = null; render(); return; }
+  const row = e.target.closest('[data-id]'); if (row) { state.selected = row.dataset.id; render(); document.getElementById('inspector').scrollTop = 0; }
+});
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && state.selected) { state.selected = null; render(); }
+  if (e.key === 'Enter' && e.target.matches('tr[data-id]')) { state.selected = e.target.dataset.id; render(); }
+});
+document.getElementById('q').addEventListener('input', e => { state.q = e.target.value; if (state.view === 'overview' || state.view === 'calendar') state.view = 'all'; render(); document.getElementById('q').focus(); });
+document.getElementById('main').addEventListener('scroll', e => document.getElementById('toolbar').classList.toggle('scrolled', e.target.scrollTop > 40));
+render();
+</script>
