@@ -145,6 +145,7 @@ button{font:inherit;color:inherit}
 .tl-track{position:relative;height:26px;border-radius:6px;background:repeating-linear-gradient(90deg,transparent 0 calc(100%/15 - 1px),var(--sep) calc(100%/15 - 1px) calc(100%/15))}
 .tl-bar{position:absolute;top:8px;height:10px;border-radius:5px;background:var(--accent-soft);border:1px solid color-mix(in srgb,var(--accent) 35%,transparent)}
 .tl-bar.ended{background:var(--gray-soft);border-color:transparent}
+.tl-bar.open{background:linear-gradient(90deg,var(--accent-soft),transparent);border-style:dashed;border-right:0;border-radius:5px 0 0 5px}
 .tl-mark{position:absolute;top:2px;width:3px;height:22px;border-radius:2px;transform:translateX(-1px)}
 .tl-mark.red{background:var(--red)} .tl-mark.orange{background:var(--orange)} .tl-mark.gray{background:var(--label-3)}
 .tl-today{position:absolute;top:-4px;bottom:-4px;width:0;border-left:1.5px dashed var(--red)}
@@ -362,6 +363,12 @@ function viewOverview() {
     <div class="list">${dl.map(deadlineRow).join('') || '<div class="empty">No upcoming deadlines</div>'}</div></section>
   ${lapsed.length ? `<section class="section"><div class="section-head"><h3>Term has ended</h3><span>No newer document on file</span></div>
     <div class="list">${lapsed.map(c => deadlineRow({ c, d: c.computed.deadlines[c.computed.deadlines.length - 1] })).join('')}</div></section>` : ''}
+  ${list.some(c => c.computed.status === 'Needs review') ? `<section class="section"><div class="section-head"><h3>No renewal date on file</h3><span>Renewal terms missing or unclear</span></div>
+    <div class="list">${list.filter(c => c.computed.status === 'Needs review').map(c => `<button class="row" data-id="${c.id}" aria-current="${state.selected === c.id}">
+      <div class="date-chip"><div class="m" style="color:var(--orange)">Date</div><div class="dd">?</div><div class="y">unknown</div></div>
+      <div style="min-width:0"><div class="t">${esc(c.counterparty)} <span class="tag">${esc(RENEWAL_LABEL[c.renewal_type])}</span>${c.ap21_supplier_code ? ` <span class="code">${esc(c.ap21_supplier_code)}</span>` : ''}</div><div class="d">${esc((c.risks.find(r => r.severity === 'high') || c.risks[0] || {}).issue || c.notice_clause_summary || '')}</div></div>
+      <div class="r"><span class="when orange num">${money(c.annual_value, c.currency)}/yr</span>${statusPill(c)}</div>
+    </button>`).join('')}</div></section>` : ''}
   <section class="section"><div class="section-head"><h3>Terms at a glance</h3><span>${fmtMonth(tlStart())} – ${fmtMonth(tlEnd())}</span></div>${timeline(list)}</section>`;
 }
 
@@ -376,7 +383,8 @@ function timeline(list) {
   for (let i = 0; i < 15; i++) { const m = new Date(s.getFullYear(), s.getMonth() + i, 1); months.push(`<span style="left:${pct(m) + 100 / 30}%">${m.toLocaleDateString('en-AU', { month: 'short' })}${m.getMonth() === 0 ? ' ’' + String(m.getFullYear()).slice(2) : ''}</span>`); }
   const rows = list.map(c => {
     const st = pd(c.computed.current_term_start), en = pd(c.computed.current_term_end);
-    const bar = st && en ? `<div class="tl-bar ${c.computed.status === 'Term ended' ? 'ended' : ''}" style="left:${pct(st)}%;width:${Math.max(.6, pct(en) - pct(st))}%" title="Current term ${fmtDate(c.computed.current_term_start)} – ${fmtDate(c.computed.current_term_end)}"></div>` : '';
+    const bar = st && en ? `<div class="tl-bar ${c.computed.status === 'Term ended' ? 'ended' : ''}" style="left:${pct(st)}%;width:${Math.max(.6, pct(en) - pct(st))}%" title="Current term ${fmtDate(c.computed.current_term_start)} – ${fmtDate(c.computed.current_term_end)}"></div>`
+      : st ? `<div class="tl-bar open" style="left:${pct(st)}%;width:${100 - pct(st)}%" title="Running since ${fmtDate(c.computed.current_term_start)}, no end date on file"></div>` : '';
     const marks = c.computed.deadlines.filter(d => d.kind !== 'Term ends').map(d => {
       const p = pct(pd(d.date)); if (p <= 0 || p >= 100) return '';
       return `<div class="tl-mark ${d.days < 0 ? 'gray' : urgency(d.days)}" style="left:${p}%" title="${esc(d.kind)} · ${fmtDate(d.date)}"></div>`;
@@ -384,7 +392,7 @@ function timeline(list) {
     return `<button class="tl-name" data-id="${c.id}">${esc(c.counterparty)}</button><div class="tl-track">${bar}${marks}<div class="tl-today" style="left:${pct(TODAY)}%"></div></div>`;
   }).join('');
   return `<div class="timeline"><div class="tl-grid"><div></div><div class="tl-months">${months.join('')}</div>${rows}</div>
-  <div class="tl-legend"><span><i style="background:var(--accent-soft);border:1px solid var(--accent)"></i>Current term</span><span><i style="background:var(--red)"></i>Deadline within 45 days</span><span><i style="background:var(--orange)"></i>Within 4 months</span><span><i style="border-left:2px dashed var(--red);border-radius:0;width:2px"></i>Today</span></div></div>`;
+  <div class="tl-legend"><span><i style="background:var(--accent-soft);border:1px solid var(--accent)"></i>Current term</span><span><i style="background:var(--accent-soft);border:1px dashed var(--accent)"></i>No end date on file</span><span><i style="background:var(--red)"></i>Deadline within 45 days</span><span><i style="background:var(--orange)"></i>Within 4 months</span><span><i style="border-left:2px dashed var(--red);border-radius:0;width:2px"></i>Today</span></div></div>`;
 }
 
 function sortValue(c, key) {
