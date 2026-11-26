@@ -51,6 +51,16 @@ class Risk(BaseModel):
     issue: str
 
 
+class ExitRoute(BaseModel):
+    route: Literal["let_expire", "early_exit_window", "convenience", "price_or_terms_change", "vendor_breach",
+                   "vendor_insolvency", "force_majeure", "warranty_failure", "mutual_agreement", "other"]
+    notice: str = Field(description="Notice 2XU must give, e.g. 'None', '30 days before term end', 'Immediate after 30-day cure period'")
+    no_notice_period: bool = Field(description="True if 2XU can exit without serving a notice period (e.g. letting a non-renewing term end, immediate termination after an uncured breach)")
+    conditions: str = Field(description="What must be true for this route to work")
+    cost_on_exit: Optional[str] = Field(None, description="Fees, buyouts or refunds that apply")
+    source: str = Field(description="Clause reference and document, e.g. 'MSA cl 12.4'")
+
+
 class Contract(BaseModel):
     counterparty: str = Field(description="Short trading name, e.g. 'Klaviyo'")
     counterparty_legal_entity: Optional[str] = None
@@ -83,6 +93,7 @@ class Contract(BaseModel):
     termination_for_convenience: Optional[str] = None
     lock_in_or_exit_costs: Optional[str] = None
     incorporated_online_terms: Optional[str] = Field(None, description="URL or name of external terms the contract incorporates")
+    exit_routes: List[ExitRoute] = Field(description="Every way 2XU can get out, including letting a term lapse; cite clauses. Include routes in incorporated online terms only if their text is in the bundle")
 
     risks: List[Risk] = Field(description="Things finance/legal should act on: auto-renew traps, conflicting clauses, departed signatories, missing signed copies, uncapped increases")
     open_questions: List[str] = Field(description="What the documents do not settle and a human must confirm")
@@ -94,5 +105,7 @@ class ContractRecord(Contract):
     """Stored record: extraction plus provenance."""
     id: str
     source_folder: str
+    ap21_supplier_code: Optional[str] = None
+    ap21_supplier_name: Optional[str] = None
     extracted_by: str
     extracted_at: str

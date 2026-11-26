@@ -54,8 +54,14 @@ How to read the bundle:
   extension notice deadline, conflicting clauses between documents, a current term that has
   already ended with no newer order on file, a signatory or notice contact who may have left,
   lock-ins, hardware buyouts, uncapped price rises. Be specific and short.
-- Every term date, renewal rule, notice period and fee must have an evidence quote copied
-  verbatim from the documents.
+- exit_routes lists every way 2XU can get out, with clause references: letting a
+  non-renewing term lapse, early-exit windows, termination for convenience, exit on a price
+  or terms change, termination for the vendor's uncured breach or insolvency, force
+  majeure. Mark no_notice_period true only where 2XU can leave without serving a notice
+  period (e.g. a term that simply ends, or immediate termination after a cure period).
+  State exit costs (buyouts, remaining fees, third-party cancellation fees).
+- Every term date, renewal rule, notice period, termination clause and fee must have an
+  evidence quote copied verbatim from the documents.
 - If something is not in the documents, leave it null. Never guess."""
 
 

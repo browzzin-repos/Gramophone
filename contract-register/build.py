@@ -112,9 +112,15 @@ def main() -> None:
     args = ap.parse_args()
     today = dt.date.fromisoformat(args.today)
 
+    codes_file = args.records.parent / "ap21_suppliers.json"
+    codes = json.loads(codes_file.read_text()) if codes_file.exists() else {}
+
     records = []
     for f in sorted(args.records.glob("*.json")):
         rec = json.loads(f.read_text())
+        if rec["id"] in codes:
+            rec["ap21_supplier_code"] = codes[rec["id"]].get("code")
+            rec["ap21_supplier_name"] = codes[rec["id"]].get("name")
         rec["computed"] = derive(rec, today)
         records.append(rec)
 

@@ -182,8 +182,9 @@ td.right,th.right{text-align:right}
 .callout span{font-size:12.5px;color:var(--label-2)}
 .group-title{font-size:11.5px;font-weight:600;color:var(--label-3);text-transform:uppercase;letter-spacing:.05em;padding:0 4px 6px}
 .kv{background:var(--surface);border-radius:var(--r-md);box-shadow:var(--shadow)}
-.kv div{display:grid;grid-template-columns:132px minmax(0,1fr);gap:10px;padding:9px 13px;font-size:13px}
-.kv div+div{border-top:1px solid var(--sep)}
+dl.kv{margin:0}
+dl.kv > div{display:grid;grid-template-columns:132px minmax(0,1fr);gap:10px;padding:9px 13px;font-size:13px}
+dl.kv > div + div{border-top:1px solid var(--sep)}
 .kv dt{color:var(--label-2)}
 .kv dd{margin:0;min-width:0;overflow-wrap:anywhere}
 .risk{display:flex;gap:10px;padding:10px 13px;font-size:13px}
@@ -199,6 +200,15 @@ td.right,th.right{text-align:right}
 .doc svg{width:18px;height:22px;flex:none;color:var(--red)}
 .doc .n{min-width:0;overflow-wrap:anywhere;flex:1}
 .doc .n small{display:block;color:var(--label-3)}
+.code{font-family:var(--mono);font-size:12px;background:var(--fill-2);border-radius:5px;padding:1px 6px;white-space:nowrap}
+.exit{padding:11px 13px;font-size:13px;display:flex;flex-direction:column;gap:4px}
+.exit+.exit{border-top:1px solid var(--sep)}
+.exit-head{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}
+.exit-head .pill{white-space:normal;text-align:right}
+.exit-notice{font-weight:500}
+.exit-cond{color:var(--label-2)}
+.exit-cost{font-size:12px;color:var(--label)}
+.exit-src{font-size:11.5px;color:var(--label-3)}
 .prov{font-size:11.5px;color:var(--label-3);padding:0 4px;line-height:1.5}
 .empty{padding:40px;text-align:center;color:var(--label-3)}
 
@@ -218,7 +228,7 @@ td.right,th.right{text-align:right}
   .toolbar,.content{padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
   .large-title h1{font-size:28px}
   .app.has-inspector .inspector{width:100%;top:env(safe-area-inset-top,0px)}
-  .kv div{grid-template-columns:110px minmax(0,1fr)}
+  dl.kv > div{grid-template-columns:110px minmax(0,1fr)}
   .row{grid-template-columns:50px minmax(0,1fr)}
   .row .r{grid-column:2;align-items:flex-start;flex-direction:row}
   .row+.row::before{left:16px}
@@ -341,7 +351,7 @@ function viewOverview() {
   const dl = upcomingDeadlines(list).filter(x => x.d.days >= 0).slice(0, 8);
   const lapsed = list.filter(c => c.computed.status === 'Term ended');
   return header(state.category || 'Overview', `Renewal and notice dates across ${list.length} contracts, worked out from the signed documents.`) +
-  `<div class="pilot-banner">${ICONS.info}<div><b>Pilot.</b> Five supplier contracts from <span class="num">Accounts/Contracts/Suppliers</span>. Every date and fee links back to a quote in the source PDF; open a contract to see them.</div></div>
+  `<div class="pilot-banner">${ICONS.info}<div><b>Pilot.</b> ${contracts.length} supplier contracts from <span class="num">Accounts/Contracts/Suppliers</span>, matched to AP21 supplier codes. Every date, fee and exit clause links back to a quote in the source document; open a contract to see them.</div></div>
   <div class="tiles">
     <div class="tile"><div class="k">Annual commitments</div><div class="v num">${audK(totalAud)}</div><div class="s">AUD equivalent, ex GST</div></div>
     <div class="tile ${in60 ? 'alert' : ''}"><div class="k">Deadlines in 60 days</div><div class="v num">${in60}</div><div class="s">notice, extension or exit</div></div>
@@ -391,18 +401,19 @@ function viewTable(title, sub) {
   const list = [...filtered()].sort((a, b) => { const x = sortValue(a, state.sort.key), y = sortValue(b, state.sort.key); return (x > y ? 1 : x < y ? -1 : 0) * state.sort.dir; });
   const th = (key, label, cls = '') => `<th class="${cls}" data-sort="${key}" aria-sort="${state.sort.key === key ? (state.sort.dir > 0 ? 'ascending' : 'descending') : 'none'}">${label}${state.sort.key === key ? `<span class="arrow">${state.sort.dir > 0 ? '▲' : '▼'}</span>` : ''}</th>`;
   return header(title, sub) + `<div class="table-wrap"><table>
-    <thead><tr>${th('name', 'Counterparty')}${th('status', 'Status')}<th>Renewal</th>${th('deadline', 'Next deadline')}${th('end', 'Term ends')}${th('value', 'Annual value', 'right')}</tr></thead>
+    <thead><tr>${th('name', 'Counterparty')}<th>AP21 code</th>${th('status', 'Status')}<th>Renewal</th>${th('deadline', 'Next deadline')}${th('end', 'Term ends')}${th('value', 'Annual value', 'right')}</tr></thead>
     <tbody>${list.map(c => {
       const n = c.computed.next_deadline;
       return `<tr data-id="${c.id}" aria-current="${state.selected === c.id}" tabindex="0">
         <td class="cp"><b>${esc(c.counterparty)}</b><span>${esc(c.category)}</span></td>
+        <td>${c.ap21_supplier_code ? `<span class="code">${esc(c.ap21_supplier_code)}</span>` : pill('Not in AP21', 'orange')}</td>
         <td>${statusPill(c)}</td>
         <td>${esc(RENEWAL_LABEL[c.renewal_type])}</td>
         <td>${n ? `<span class="when ${urgency(n.days)} num">${fmtDate(n.date)}</span><div style="font-size:12px;color:var(--label-2)">${esc(n.kind)}</div>` : '<span style="color:var(--label-3)">—</span>'}</td>
         <td class="num">${fmtDate(c.computed.current_term_end)}</td>
         <td class="right num">${money(c.annual_value, c.currency)}${c.currency !== 'AUD' && c.computed.annual_value_aud ? `<div style="font-size:12px;color:var(--label-3)">≈ ${audK(c.computed.annual_value_aud)}</div>` : ''}</td>
       </tr>`;
-    }).join('') || '<tr><td colspan="6" class="empty">No contracts match</td></tr>'}</tbody></table></div>`;
+    }).join('') || '<tr><td colspan="7" class="empty">No contracts match</td></tr>'}</tbody></table></div>`;
 }
 
 function viewCalendar() {
@@ -436,7 +447,9 @@ function inspector(c) {
       ['Early exit', c.early_exit_summary ? `${esc(c.early_exit_summary)}${c.early_exit_deadline ? ` <b class="num">(by ${fmtDate(c.early_exit_deadline)})</b>` : ''}` : null],
       ...c.computed.deadlines.map(d => [esc(d.kind), `<span class="num" style="color:var(--${d.days < 0 ? 'label-3' : urgency(d.days) === 'gray' ? 'label' : urgency(d.days)})">${fmtDate(d.date)}</span> <span style="color:var(--label-3)">· ${relDays(d.days)}</span>`])
     ])}</div>
+    ${exitRoutes(c)}
     <div><div class="group-title">Commercials</div>${kv([
+      ['AP21 supplier', c.ap21_supplier_code ? `<span class="code">${esc(c.ap21_supplier_code)}</span> ${esc(c.ap21_supplier_name || '')}` : '<span style="color:var(--orange)">No supplier record in AP21</span>'],
       ['Annual value', `<b class="num">${money(c.annual_value, c.currency)}</b>${c.currency !== 'AUD' && c.computed.annual_value_aud ? ` <span style="color:var(--label-3)">≈ ${audK(c.computed.annual_value_aud)}</span>` : ''}`],
       ['One-off fees', c.one_off_fees ? money(c.one_off_fees, c.currency) : null],
       ['Fees', esc(c.fee_summary)],
@@ -451,6 +464,21 @@ function inspector(c) {
     <div><div class="group-title">Documents</div><div class="kv">${c.documents.map(d => `<div class="doc">${ICONS.pdf}<div class="n">${esc(d.file_name)}<small>${esc(d.doc_type.replace(/_/g, ' '))}${d.document_date ? ' · ' + fmtDate(d.document_date) : ''}</small></div>${d.signed ? pill('Signed', 'green') : pill('Unsigned', 'gray')}</div>`).join('')}</div></div>
     <div class="prov">${esc(c.extracted_by)} · confidence ${esc(c.confidence)}${c.computed.computed_notes.length ? '<br>' + c.computed.computed_notes.map(esc).join('<br>') : ''}<br>Folder: Accounts/Contracts/Suppliers/${esc(c.source_folder)}</div>
   </div>`;
+}
+
+const ROUTE_LABEL = { let_expire: 'Let it lapse', early_exit_window: 'Early exit window', convenience: 'Termination for convenience', price_or_terms_change: 'Price or terms change', vendor_breach: 'Vendor breach', vendor_insolvency: 'Vendor insolvency', force_majeure: 'Force majeure', warranty_failure: 'Warranty failure', mutual_agreement: 'Mutual agreement', other: 'Note' };
+function exitRoutes(c) {
+  const routes = c.exit_routes || [];
+  if (!routes.length) return '';
+  // Unconditional routes first, then the ones that depend on the vendor doing something wrong.
+  const rank = r => ['vendor_breach', 'vendor_insolvency', 'force_majeure', 'warranty_failure', 'other'].includes(r.route) ? 1 : 0;
+  const sorted = [...routes].sort((a, b) => rank(a) - rank(b));
+  return `<div><div class="group-title">How to exit</div><div class="kv">${sorted.map(r => `<div class="exit">
+    <div class="exit-head"><b>${esc(ROUTE_LABEL[r.route] || r.route)}</b>${r.no_notice_period ? pill('No notice period', 'green') : pill(r.notice, 'gray')}</div>
+    ${r.no_notice_period ? `<div class="exit-notice">${esc(r.notice)}</div>` : ''}
+    <div class="exit-cond">${esc(r.conditions)}</div>
+    ${r.cost_on_exit ? `<div class="exit-cost">Cost: ${esc(r.cost_on_exit)}</div>` : ''}
+    <div class="exit-src">${esc(r.source)}</div></div>`).join('')}</div></div>`;
 }
 
 /* ---------- render ---------- */
