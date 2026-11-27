@@ -633,7 +633,10 @@ def quick_estimate(todo: list[dict]) -> int:
                     continue
                 pages, size = pages + n, size + b
             else:
-                text_tokens += f.stat().st_size // 8  # Word files: mostly XML; text is a fraction of the size
+                try:
+                    text_tokens += len(docx_text(f) if f.suffix.lower() == ".docx" else f.read_text(errors="ignore")) // 4
+                except Exception:
+                    pass
         rows.append((e["name"], pages * TOKENS_PER_PAGE + text_tokens + 12000, pages))
     n, tokens = len(rows), sum(r[1] for r in rows)
     for name, t, pg in sorted(rows, key=lambda r: -r[1])[:10]:
