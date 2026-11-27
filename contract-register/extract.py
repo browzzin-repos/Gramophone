@@ -545,6 +545,11 @@ class BudgetReached(Exception):
 
 def select(manifest: list[dict], args) -> list[dict]:
     todo = [m for m in manifest if m["files"]]
+    area = lambda m: " ".join(m["areas"] + m["paths"]).lower()
+    if getattr(args, "area", None):
+        todo = [m for m in todo if args.area.lower() in area(m)]
+    if getattr(args, "skip_area", None):
+        todo = [m for m in todo if args.skip_area.lower() not in area(m)]
     if not getattr(args, "include_dormant", False) and not args.only:
         todo = [m for m in todo if m.get("status") != "dormant"]
     if args.only:
@@ -747,6 +752,8 @@ def main() -> int:
     ap.add_argument("--max-usd", type=float, default=50.0,
                     help="Stop starting new counterparties once estimated spend in this run reaches this (default 50)")
     ap.add_argument("--no-web", action="store_true", help="Do not fetch online terms")
+    ap.add_argument("--area", help="Only counterparties whose folder or area contains this text, e.g. Leases")
+    ap.add_argument("--skip-area", help="Leave out counterparties whose folder or area contains this text, e.g. Leases")
     ap.add_argument("--quick", action="store_true", help="estimate only: count pages locally instead of asking the API (fast)")
     ap.add_argument("--include-dormant", action="store_true", help="Also extract counterparties with no recent activity or documents")
     args = ap.parse_args()
