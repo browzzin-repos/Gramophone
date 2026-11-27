@@ -389,8 +389,12 @@ def build_content(entry: dict, today: str) -> list[dict]:
     for f, title in sorted(chosen, key=lambda ft: ft[0].stat().st_mtime):
         try:
             if f.suffix.lower() in PDF:
+                data = f.read_bytes()
+                if b"/Encrypt" in data[-200_000:] or b"/Encrypt" in data[:200_000]:  # password-protected: the API rejects it
+                    left_out.append(f"{title} (password-protected)")
+                    continue
                 content.append({"type": "document", "title": title, "source": {
-                    "type": "base64", "media_type": "application/pdf", "data": base64.b64encode(f.read_bytes()).decode()}})
+                    "type": "base64", "media_type": "application/pdf", "data": base64.b64encode(data).decode()}})
             else:
                 text = docx_text(f) if f.suffix.lower() == ".docx" else f.read_text(errors="ignore")
                 if text.strip():
