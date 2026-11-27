@@ -170,6 +170,8 @@ class ContractRecord(Contract):
     source_paths: List[str] = Field(default_factory=list)
     skipped_files: List[str] = Field(default_factory=list)
     online_terms_fetched: List[FetchedTerms] = Field(default_factory=list)
+    activity: Optional[dict] = Field(None, description='Latest payment (Medius) or invoice (TRS) matched to this counterparty')
+    activity_status: Optional[str] = None
     ap21_supplier_code: Optional[str] = None
     ap21_supplier_name: Optional[str] = None
     extracted_by: str

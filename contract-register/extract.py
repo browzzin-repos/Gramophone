@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import csv
 import datetime as dt
 import html
 import json
@@ -256,6 +257,61 @@ def collect_files(src: list[tuple[str, str]]) -> tuple[list[dict], list[str]]:
     return files, skipped
 
 
+# ---------------------------------------------------------------- activity (is the agreement still live?)
+
+ACTIVE_DAYS = 548  # 18 months
+CODE_RE = re.compile(r"(?<![A-Z0-9])[0-9][A-Z0-9]{6,8}(?![A-Z0-9])")
+
+
+def load_activity() -> list[dict]:
+    """Rows from data/activity_*.csv: suppliers paid (Medius) and customers invoiced (TRS)."""
+    rows = []
+    for f in sorted(DATA.glob("activity_*.csv")):
+        with f.open() as fh:
+            for r in csv.DictReader(fh):
+                name = r.get("name") or ""
+                rows.append({"name": name, "codes": set((r.get("codes") or "").upper().split()), "last_date": r.get("last_date") or "",
+                             "amount_12m": float(r.get("amount_12m") or 0), "source": r.get("source") or f.stem,
+                             "key": norm(name), "tok": first_token(name)})
+    return rows
+
+
+def match_activity(entry: dict, activity: list[dict]) -> dict | None:
+    text = " ".join(entry["paths"] + [f["title"] for f in entry["files"]]).upper()
+    codes = set(CODE_RE.findall(text))
+    key, tok = norm(entry["name"]), first_token(entry["name"])
+    hits = [a for a in activity if codes & a["codes"]]
+    if not hits:
+        hits = [a for a in activity if a["key"] and (a["key"] == key or (min(len(a["key"]), len(key)) >= 5 and (a["key"].startswith(key) or key.startswith(a["key"]))))]
+    if not hits and len(tok) >= 4:
+        hits = [a for a in activity if a["tok"] == tok]
+    if not hits:
+        return None
+    best = max(hits, key=lambda a: a["last_date"])
+    return {"matched": best["name"], "source": best["source"], "last_date": best["last_date"],
+            "amount_12m": round(sum(a["amount_12m"] for a in hits)), "accounts": len(hits)}
+
+
+def triage(manifest: list[dict]) -> None:
+    """Mark each counterparty active / recent / dormant / unknown."""
+    activity = load_activity()
+    have_suppliers = (DATA / "activity_suppliers.csv").exists()
+    cutoff = (dt.date.today() - dt.timedelta(days=ACTIVE_DAYS)).isoformat()
+    recent_year = re.compile(rf"20({'|'.join(str(y)[2:] for y in range(dt.date.today().year - 2, dt.date.today().year + 2))})")
+    for m in manifest:
+        act = match_activity(m, activity) if activity else None
+        m["activity"] = act
+        recent_doc = any(recent_year.search(f["title"]) for f in m["files"])
+        if act and act["last_date"] >= cutoff:
+            m["status"] = "active"
+        elif recent_doc:
+            m["status"] = "recent"  # signed or dated in the last ~2 years, even if no money has moved
+        elif act or (activity and have_suppliers):
+            m["status"] = "dormant"
+        else:
+            m["status"] = "unknown"  # no activity data to judge by
+
+
 def load_manifest() -> list[dict]:
     if not MANIFEST.exists():
         raise SystemExit("No data/manifest.json yet. Run: python extract.py plan <Contracts folder> [--extra <folder> ...]")
@@ -403,6 +459,8 @@ def extract_one(client: anthropic.Anthropic, entry: dict, today: str, web: bool)
         source_paths=entry["paths"],
         skipped_files=entry.get("skipped", []),
         online_terms_fetched=fetched,
+        activity=entry.get("activity"),
+        activity_status=entry.get("status"),
         extracted_by=f"Claude API ({response.model})",
         extracted_at=dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
     )
@@ -417,6 +475,8 @@ class BudgetReached(Exception):
 
 def select(manifest: list[dict], args) -> list[dict]:
     todo = [m for m in manifest if m["files"]]
+    if not getattr(args, "include_dormant", False) and not args.only:
+        todo = [m for m in todo if m.get("status") != "dormant"]
     if args.only:
         wanted = {s.strip().lower() for s in args.only.split(",")}
         todo = [m for m in todo if m["name"].lower() in wanted or m["id"] in wanted]
@@ -440,7 +500,15 @@ def cmd_plan(args) -> int:
             return 2
     DATA.mkdir(parents=True, exist_ok=True)
     m = plan(roots)
+    triage(m)
     MANIFEST.write_text(json.dumps(m, indent=2))
+    with (DATA / "triage.csv").open("w", newline="") as fh:
+        w = csv.writer(fh)
+        w.writerow(["status", "counterparty", "id", "last_activity", "amount_12m", "matched_to", "source", "files", "folders"])
+        for x in sorted(m, key=lambda x: (x["status"], x["name"].lower())):
+            a = x.get("activity") or {}
+            w.writerow([x["status"], x["name"], x["id"], a.get("last_date", ""), a.get("amount_12m", ""), a.get("matched", ""),
+                        a.get("source", ""), len(x["files"]), " + ".join(x["paths"])])
     multi = [x for x in m if len(x["paths"]) > 1]
     empty = [x for x in m if not x["files"]]
     print(f"{len(m)} counterparties, {sum(len(x['files']) for x in m)} readable files "
@@ -457,7 +525,15 @@ def cmd_plan(args) -> int:
             exts[e] = exts.get(e, 0) + 1
     if exts:
         print("\nNot read (by type): " + ", ".join(f"{k} {v}" for k, v in sorted(exts.items(), key=lambda kv: -kv[1])))
-    print(f"\nWrote {MANIFEST.relative_to(HERE)}. Review it, then run: python extract.py estimate")
+    counts: dict[str, int] = {}
+    for x in m:
+        counts[x["status"]] = counts.get(x["status"], 0) + 1
+    print("\nStill live? " + ", ".join(f"{k} {v}" for k, v in sorted(counts.items())) +
+          " (active = paid or invoiced in the last 18 months; recent = documents dated in the last 2 years; "
+          "dormant = neither, skipped unless --include-dormant).")
+    if not (DATA / "activity_suppliers.csv").exists():
+        print("No supplier activity yet: run python activity.py <invoices.json> first, or suppliers show as unknown.")
+    print(f"\nWrote {MANIFEST.relative_to(HERE)} and data/triage.csv. Review them, then run: python extract.py estimate")
     return 0
 
 
@@ -558,6 +634,7 @@ def main() -> int:
     ap.add_argument("--max-usd", type=float, default=50.0,
                     help="Stop starting new counterparties once estimated spend in this run reaches this (default 50)")
     ap.add_argument("--no-web", action="store_true", help="Do not fetch online terms")
+    ap.add_argument("--include-dormant", action="store_true", help="Also extract counterparties with no recent activity or documents")
     args = ap.parse_args()
     if args.command == "plan" and args.root is None:
         print("plan needs the Contracts folder, e.g. python extract.py plan ~/Downloads/contracts/Contracts")

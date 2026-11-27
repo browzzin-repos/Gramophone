@@ -514,6 +514,7 @@ function inspector(c) {
       ['AP21 supplier', c.ap21_supplier_code ? `<span class="code">${esc(c.ap21_supplier_code)}</span> ${esc(c.ap21_supplier_name || '')}` : '<span style="color:var(--orange)">No supplier record in AP21</span>'],
       ['Annual value', `<b class="num">${money(c.annual_value, c.currency)}</b>${c.currency !== 'AUD' && c.computed.annual_value_aud ? ` <span style="color:var(--label-3)">≈ ${audK(c.computed.annual_value_aud)}</span>` : ''}`],
       ['One-off fees', c.one_off_fees ? money(c.one_off_fees, c.currency) : null],
+      ['Last money movement', c.activity ? `${fmtDate(c.activity.last_date)} · ${esc(c.activity.source)}${c.activity.amount_12m ? ' · ' + Math.round(c.activity.amount_12m).toLocaleString('en-AU') + ' in last 12 months' : ''} <span class="muted">(${esc(c.activity.matched)})</span>` : (c.activity_status ? '<span class="muted">No payments or invoices matched</span>' : null)],
       ['Fees', esc(c.fee_summary)],
       ['Price at renewal', esc(c.price_change_on_renewal)],
       ['Billing', esc([c.billing_frequency, c.payment_terms].filter(Boolean).join(' · '))],
