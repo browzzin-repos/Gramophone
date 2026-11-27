@@ -146,6 +146,12 @@ NOISE = GENERIC_FIRST | {"mh", "hm", "edited", "pty", "ltd", "v", "final", "sign
                          "pdf", "version", "updated", "or", "all", "only", "to", "re", "x", "fy", "xu"}
 
 
+def glob_match(pattern: str, path: str) -> bool:
+    """'*' matches within one folder level, '**' across levels."""
+    rx = re.escape(pattern).replace(r"\*\*", "\0").replace(r"\*", "[^/]*").replace("\0", ".*")
+    return re.fullmatch(rx, path) is not None
+
+
 def name_tokens(name: str) -> set[str]:
     return {w for w in re.findall(r"[a-z]+[a-z0-9]*", name.lower()) if len(w) >= 2 and w not in NOISE}
 
@@ -172,7 +178,7 @@ def plan(roots: list[tuple[Path, str]]) -> list[dict]:
     split = set(cfg.get("split", []))
     names = cfg.get("names", {})
     skip = lambda p, d: (p.name.startswith((".", "__MACOSX")) or d in exclude or p.name in exclude
-                         or any(fnmatch.fnmatch(d, pat) for pat in exclude if "*" in pat))
+                         or any(glob_match(pat, d) for pat in exclude if "*" in pat))
     units: list[dict] = []  # {name, area, paths (display), src [(root, abs)], kind}
 
     def unit(root, p, area, kind):
@@ -327,6 +333,8 @@ def match_activity(entry: dict, activity: list[dict]) -> dict | None:
 def triage(manifest: list[dict]) -> None:
     """Mark each counterparty active / recent / dormant / unknown."""
     activity = load_activity()
+    cfg = json.loads(GROUPING.read_text()) if GROUPING.exists() else {}
+    keep, drop = cfg.get("keep", []), cfg.get("drop", [])
     have_suppliers = (DATA / "activity_suppliers.csv").exists()
     cutoff = (dt.date.today() - dt.timedelta(days=ACTIVE_DAYS)).isoformat()
     recent_year = re.compile(rf"20({'|'.join(str(y)[2:] for y in range(dt.date.today().year - 2, dt.date.today().year + 2))})")
@@ -343,6 +351,10 @@ def triage(manifest: list[dict]) -> None:
             m["status"] = "dormant"
         else:
             m["status"] = "unknown"  # no activity data to judge by
+        if any(glob_match(p, path) for p in drop for path in m["paths"]):
+            m["status"] = "dormant"
+        elif m["status"] in ("dormant", "unknown") and any(glob_match(p, path) for p in keep for path in m["paths"]):
+            m["status"] = "kept"  # in an area that is always in scope (data/grouping.json "keep")
 
 
 def load_manifest() -> list[dict]:
@@ -563,7 +575,7 @@ def cmd_plan(args) -> int:
         counts[x["status"]] = counts.get(x["status"], 0) + 1
     print("\nStill live? " + ", ".join(f"{k} {v}" for k, v in sorted(counts.items())) +
           " (active = paid or invoiced in the last 18 months; recent = documents dated in the last 2 years; "
-          "dormant = neither, skipped unless --include-dormant).")
+          "kept = always in scope per data/grouping.json; dormant = none of these, skipped unless --include-dormant).")
     if not (DATA / "activity_suppliers.csv").exists():
         print("No supplier activity yet: run python activity.py <invoices.json> first, or suppliers show as unknown.")
     print(f"\nWrote {MANIFEST.relative_to(HERE)} and data/triage.csv. Review them, then run: python extract.py estimate")
