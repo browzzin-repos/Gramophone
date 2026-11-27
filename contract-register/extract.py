@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import collections
 import csv
 import fnmatch
 import datetime as dt
@@ -391,8 +392,156 @@ def pdf_pages(path: Path) -> int:
     return n or max(1, len(data) // 60_000)
 
 
+# ---------------------------------------------------------------- first-page check (is this file an agreement?)
+
+CLASSIFY = DATA / "classify.json"
+CLASSIFY_MODEL = "claude-haiku-5-5"
+PRICES = {"claude-opus-5-5": (4.00, 20.00), "claude-sonnet-5-5": (2.00, 10.00), "claude-haiku-5-5": (0.10, 0.50)}
+DOC_TYPES = ["agreement", "amendment_or_extension", "order_form_or_signed_quote", "terms_and_conditions", "nda", "side_letter",
+             "termination_or_settlement", "unsigned_or_draft_agreement", "proposal_or_unsigned_quote", "invoice_or_statement",
+             "form_or_application", "letter_or_notice", "report_or_presentation", "certificate_or_bank_document", "other"]
+CLASSIFY_SCHEMA = {
+    "type": "object", "additionalProperties": False,
+    "required": ["is_agreement", "doc_type", "signed", "counterparty", "date"],
+    "properties": {
+        "is_agreement": {"type": "boolean"}, "doc_type": {"type": "string", "enum": DOC_TYPES},
+        "signed": {"type": "string", "enum": ["yes", "no", "unclear"]},
+        "counterparty": {"type": "string"}, "date": {"type": "string"},
+    },
+}
+CLASSIFY_PROMPT = """This is the first page of a file from 2XU's contract folders. Decide whether the file is an agreement.
+is_agreement is true for anything that creates, varies, extends, renews or ends obligations between 2XU and another
+party: agreements, contracts, deeds, leases, licences, order forms, signed or accepted quotes, statements of work,
+amendments, extension or variation letters, side letters, terms and conditions, NDAs, termination or settlement
+agreements, and unsigned or draft versions of these. It is false for invoices, statements, receipts, credit
+applications and other forms, bank and insurance documents, certificates, reports, presentations, marketing
+material, plans, and letters that do not change an agreement. If you cannot tell, set is_agreement true.
+counterparty: the other party's name, or "" if not shown. date: the document date as YYYY-MM-DD, or "" if not shown."""
+_classes: dict | None = None
+
+
+def file_key(f: dict) -> str:
+    st = Path(f["path"]).stat()
+    return f"{f['title']}|{st.st_size}|{int(st.st_mtime)}"
+
+
+def load_classes() -> dict:
+    global _classes
+    if _classes is None:
+        _classes = json.loads(CLASSIFY.read_text()) if CLASSIFY.exists() else {}
+    return _classes
+
+
+def agreement_files(entry: dict) -> tuple[list[dict], list[str]]:
+    """Files to send: everything except files the first-page check found are not agreements."""
+    classes, keep, dropped = load_classes(), [], []
+    for f in entry["files"]:
+        c = classes.get(file_key(f))
+        if c and c.get("is_agreement") is False:
+            dropped.append(f"{Path(f['title']).name} ({c.get('doc_type', 'not an agreement').replace('_', ' ')})")
+        else:
+            keep.append(f)
+    return keep, dropped
+
+
+def first_page(path: Path) -> dict | None:
+    """The file's first page as a content block, or None if it cannot be read."""
+    suffix = path.suffix.lower()
+    if suffix in PDF:
+        try:
+            import io
+            import pypdf
+        except ImportError:
+            raise SystemExit("The first-page check needs pypdf: pip install pypdf")
+        try:
+            reader = pypdf.PdfReader(str(path))
+            if reader.is_encrypted or not reader.pages:
+                return None
+            w = pypdf.PdfWriter()
+            w.add_page(reader.pages[0])
+            buf = io.BytesIO()
+            w.write(buf)
+        except Exception:
+            return None
+        return {"type": "document", "source": {"type": "base64", "media_type": "application/pdf",
+                                               "data": base64.b64encode(buf.getvalue()).decode()}}
+    try:
+        text = docx_text(path) if suffix == ".docx" else path.read_text(errors="ignore")
+    except Exception:
+        return None
+    return {"type": "document", "source": {"type": "text", "media_type": "text/plain", "data": text[:6000] or "(empty)"}}
+
+
+def classify_one(client: anthropic.Anthropic, model: str, f: dict) -> tuple[dict, float]:
+    block = first_page(Path(f["path"]))
+    if block is None:
+        return {"is_agreement": True, "doc_type": "other", "signed": "unclear", "counterparty": "", "date": "",
+                "note": "first page unreadable (protected or damaged); kept"}, 0.0
+    block["title"] = Path(f["title"]).name
+    resp = client.messages.create(
+        model=model, max_tokens=2000, output_config={"effort": "low", "format": {"type": "json_schema", "schema": CLASSIFY_SCHEMA}},
+        messages=[{"role": "user", "content": [block, {"type": "text", "text": CLASSIFY_PROMPT}]}],
+    )
+    pin, pout = PRICES.get(model, PRICES[MODEL])
+    usd = (resp.usage.input_tokens * pin + resp.usage.output_tokens * pout) / 1e6
+    if resp.stop_reason != "end_turn":
+        return {"is_agreement": True, "doc_type": "other", "signed": "unclear", "counterparty": "", "date": "",
+                "note": f"not classified ({resp.stop_reason}); kept"}, usd
+    text = "".join(b.text for b in resp.content if b.type == "text")
+    return json.loads(text[text.find("{"): text.rfind("}") + 1]), usd
+
+
+def cmd_classify(args) -> int:
+    manifest = load_manifest()
+    args.force = True  # check every in-scope file, whether or not the counterparty has a record yet
+    todo = select(manifest, args)
+    classes = load_classes()
+    seen, files = set(), []
+    for e in todo:
+        for f in e["files"]:
+            k = file_key(f)
+            if k not in classes and k not in seen:
+                seen.add(k)
+                files.append(f)
+    print(f"{len(files)} files to check ({len(classes)} already checked), model {args.model}")
+    client, lock, done, usd, fails = client_(), threading.Lock(), 0, 0.0, 0
+    with ThreadPoolExecutor(max_workers=max(args.workers, 8)) as pool:
+        futs = {pool.submit(classify_one, client, args.model, f): f for f in files}
+        for fut in as_completed(futs):
+            f = futs[fut]
+            try:
+                c, cost = fut.result()
+            except (anthropic.APIError, ValueError) as e:
+                fails += 1
+                print(f"  could not check {f['title'][:100]}: {e}")
+                continue
+            with lock:
+                classes[file_key(f)] = c
+                usd += cost
+                done += 1
+                if done % 50 == 0:
+                    CLASSIFY.write_text(json.dumps(classes, indent=1))
+                    print(f"  {done}/{len(files)} checked, US${usd:.2f} so far")
+    CLASSIFY.write_text(json.dumps(classes, indent=1))
+    # Summary and a CSV to review
+    in_scope = {file_key(f): f for e in todo for f in e["files"]}
+    rows = [(k, in_scope[k], classes[k]) for k in in_scope if k in classes]
+    with (DATA / "classify.csv").open("w", newline="") as fh:
+        w = csv.writer(fh)
+        w.writerow(["is_agreement", "doc_type", "signed", "counterparty_on_page", "date", "file", "note"])
+        for k, f, c in sorted(rows, key=lambda r: (r[2].get("is_agreement") is not False, r[1]["title"])):
+            w.writerow([c.get("is_agreement"), c.get("doc_type"), c.get("signed"), c.get("counterparty"), c.get("date"), f["title"], c.get("note", "")])
+    by_type = collections.Counter(c.get("doc_type") for _, _, c in rows)
+    not_agr = [r for r in rows if r[2].get("is_agreement") is False]
+    print("\nBy type: " + ", ".join(f"{t.replace('_', ' ')} {n}" for t, n in by_type.most_common()))
+    print(f"{len(rows) - len(not_agr)} agreements kept, {len(not_agr)} files left out as not agreements. "
+          f"Cost of this check US${usd:.2f}. Review data/classify.csv, then: python extract.py estimate --quick")
+    return 1 if fails else 0
+
+
 def build_content(entry: dict, today: str) -> list[dict]:
-    files = [(Path(f["path"]), f["title"]) for f in entry["files"]]
+    kept, not_agreements = agreement_files(entry)
+    files = [(Path(f["path"]), f["title"]) for f in kept]
     # Fit the request: signed/executed PDFs and newer files first; present the chosen ones oldest first.
     rank = lambda ft: (not re.search(r"sign|execut|complet|final", ft[0].name, re.I), ft[0].suffix.lower() != ".pdf", -ft[0].stat().st_mtime)
     chosen, left_out, total, pages = [], [], 0, 0
@@ -428,6 +577,8 @@ def build_content(entry: dict, today: str) -> list[dict]:
         notes.append(f"Left out because the bundle is too large or unreadable: {', '.join(left_out)}.")
     if entry.get("skipped"):
         notes.append("Also filed but not readable here (other formats): " + ", ".join(entry["skipped"]) + ".")
+    if not_agreements:
+        notes.append("Also filed but not sent because a first-page check found they are not agreements: " + ", ".join(not_agreements) + ".")
     content.append({"type": "text", "text": (
         f"Today is {today}. The documents above are everything filed for counterparty '{entry['name']}' "
         f"(folders: {', '.join(entry['paths'])}). {' '.join(notes)} Produce the register record.")})
@@ -545,6 +696,8 @@ class BudgetReached(Exception):
 
 def select(manifest: list[dict], args) -> list[dict]:
     todo = [m for m in manifest if m["files"]]
+    if getattr(args, "command", "") in ("run", "estimate"):
+        todo = [m for m in todo if agreement_files(m)[0]]
     area = lambda m: " ".join(m["areas"] + m["paths"]).lower()
     if getattr(args, "area", None):
         todo = [m for m in todo if args.area.lower() in area(m)]
@@ -628,7 +781,7 @@ def quick_estimate(todo: list[dict], top_files: int = 0) -> int:
     """Offline estimate from page counts within each request's limits. Fast, no upload."""
     rows = []
     for e in todo:
-        files = [Path(f["path"]) for f in e["files"]]
+        files = [Path(f["path"]) for f in agreement_files(e)[0]]
         rank = lambda f: (not re.search(r"sign|execut|complet|final", f.name, re.I), f.suffix.lower() != ".pdf", -f.stat().st_mtime)
         pages, size, text_tokens = 0, 0, 0
         for f in sorted(files, key=rank):
@@ -747,7 +900,7 @@ def cmd_run(args) -> int:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("command", choices=["plan", "estimate", "run"])
+    ap.add_argument("command", choices=["plan", "classify", "estimate", "run"])
     ap.add_argument("root", nargs="?", type=lambda s: Path(s).expanduser(),
                     help="plan only: local copy of Accounts/Contracts (laid out as area/counterparty)")
     ap.add_argument("--extra", action="append", default=[], type=lambda s: Path(s).expanduser(),
@@ -761,6 +914,7 @@ def main() -> int:
     ap.add_argument("--no-web", action="store_true", help="Do not fetch online terms")
     ap.add_argument("--area", help="Only counterparties whose folder or area contains this text, e.g. Leases")
     ap.add_argument("--skip-area", help="Leave out counterparties whose folder or area contains this text, e.g. Leases")
+    ap.add_argument("--model", default=MODEL, help="classify only: model for the first-page check, e.g. claude-haiku-5-5")
     ap.add_argument("--top-files", type=int, default=0, help="estimate --quick only: list the N largest PDF files by pages")
     ap.add_argument("--quick", action="store_true", help="estimate only: count pages locally instead of asking the API (fast)")
     ap.add_argument("--include-dormant", action="store_true", help="Also extract counterparties with no recent activity or documents")
@@ -768,7 +922,7 @@ def main() -> int:
     if args.command == "plan" and args.root is None:
         print("plan needs the Contracts folder, e.g. python extract.py plan ~/Downloads/contracts/Contracts")
         return 2
-    return {"plan": cmd_plan, "estimate": cmd_estimate, "run": cmd_run}[args.command](args)
+    return {"plan": cmd_plan, "classify": cmd_classify, "estimate": cmd_estimate, "run": cmd_run}[args.command](args)
 
 
 if __name__ == "__main__":
