@@ -417,6 +417,9 @@ agreements, and unsigned or draft versions of these. It is false for invoices, s
 applications and other forms, bank and insurance documents, certificates, reports, presentations, marketing
 material, plans, and letters that do not change an agreement. If you cannot tell, set is_agreement true.
 counterparty: the other party's name, or "" if not shown. date: the document date as YYYY-MM-DD, or "" if not shown."""
+SIGNED_TYPES = {"agreement", "amendment_or_extension", "order_form_or_signed_quote", "terms_and_conditions", "nda", "side_letter",
+                "termination_or_settlement"}
+DRAFT_TYPES = {"unsigned_or_draft_agreement", "proposal_or_unsigned_quote"}
 _classes: dict | None = None
 
 
@@ -435,10 +438,14 @@ def load_classes() -> dict:
 def agreement_files(entry: dict) -> tuple[list[dict], list[str]]:
     """Files to send: everything except files the first-page check found are not agreements."""
     classes, keep, dropped = load_classes(), [], []
+    cs = {f["path"]: classes.get(file_key(f)) or {} for f in entry["files"]}
+    signed_on_file = any(c.get("signed") == "yes" and c.get("doc_type") in SIGNED_TYPES for c in cs.values())
     for f in entry["files"]:
-        c = classes.get(file_key(f))
-        if c and c.get("is_agreement") is False:
+        c = cs[f["path"]]
+        if c.get("is_agreement") is False:
             dropped.append(f"{Path(f['title']).name} ({c.get('doc_type', 'not an agreement').replace('_', ' ')})")
+        elif signed_on_file and c.get("doc_type") in DRAFT_TYPES:
+            dropped.append(f"{Path(f['title']).name} (draft or unsigned; a signed version is on file)")
         else:
             keep.append(f)
     return keep, dropped
@@ -672,20 +679,139 @@ def extract_one(client: anthropic.Anthropic, entry: dict, today: str, web: bool)
                 raise RuntimeError(f"{entry['name']}: reply did not match the schema after a correction round: {e}") from e
             messages.append({"role": "user", "content": f"That JSON does not validate:\n{e}\nReply with the corrected JSON object only."})
     usage["usd"] = round(usage["usd"], 4)
-    record = ContractRecord(
+    return make_record(entry, contract, response.model, fetched), usage
+
+
+def make_record(entry: dict, contract: Contract, model: str, fetched: list[dict]) -> ContractRecord:
+    return ContractRecord(
         **contract.model_dump(),
         id=entry["id"],
         source_folder=entry["paths"][0],
         area=", ".join(entry["areas"]),
         source_paths=entry["paths"],
-        skipped_files=entry.get("skipped", []),
+        skipped_files=entry.get("skipped", []) + agreement_files(entry)[1],
         online_terms_fetched=fetched,
         activity=entry.get("activity"),
         activity_status=entry.get("status"),
-        extracted_by=f"Claude API ({response.model})",
+        extracted_by=f"Claude API ({model})",
         extracted_at=dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
     )
-    return record, usage
+
+
+# ---------------------------------------------------------------- batch (half price, results within 24 hours)
+
+BATCHES = DATA / "batches.json"
+BATCH_BYTES = 200 * 1024 * 1024  # API limit is 256 MB per batch
+
+
+def batch_params(entry: dict, today: str, web: bool) -> dict:
+    content = build_content(entry, today) + [{"type": "text", "text": FORMAT_NOTE}]
+    return {"model": MODEL, "max_tokens": 32000, "thinking": {"type": "adaptive"}, "output_config": {"effort": "high"},
+            "system": SYSTEM, **({"tools": [WEB_FETCH]} if web else {}), "messages": [{"role": "user", "content": content}]}
+
+
+def cmd_submit(args) -> int:
+    from anthropic.types.messages.batch_create_params import Request
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
+    state = json.loads(BATCHES.read_text()) if BATCHES.exists() else {}
+    pending = {eid for b in state.values() if not b.get("collected") for eid in b["ids"].values()}
+    todo = [e for e in select(load_manifest(), args) if e["id"] not in pending]
+    if not todo:
+        print("Nothing to submit: every in-scope counterparty has a record or is in a batch that has not been collected yet.")
+        return 0
+    print(f"{len(todo)} counterparties to submit. Normal-price estimate below; batches cost about half of it:")
+    quick_estimate(todo)
+    client, today = client_(), dt.date.today().isoformat()
+    chunk, size, n = [], 0, 0
+
+    def send():
+        nonlocal chunk, size, n
+        if not chunk:
+            return
+        ids = {f"r{i:04d}": e["id"] for i, (e, _) in enumerate(chunk)}
+        reqs = [Request(custom_id=cid, params=p) for cid, (e, p) in zip(ids, chunk)]
+        b = client.with_options(timeout=3600, max_retries=3).messages.batches.create(requests=reqs)  # large uploads
+        state[b.id] = {"ids": ids, "submitted": dt.datetime.now().isoformat(timespec="seconds"), "collected": False}
+        BATCHES.write_text(json.dumps(state, indent=1))
+        n += 1
+        print(f"  batch {n} submitted: {b.id} ({len(reqs)} counterparties, {size / 1e6:.0f} MB)")
+        chunk, size = [], 0
+
+    for e in todo:
+        p = batch_params(e, today, not args.no_web)
+        bytes_ = len(json.dumps(p))
+        if bytes_ > BATCH_BYTES:
+            print(f"  {e['name']}: too large for a batch ({bytes_ / 1e6:.0f} MB); run it with: python extract.py run --only \"{e['id']}\"")
+            continue
+        if size + bytes_ > BATCH_BYTES:
+            send()
+        chunk.append((e, p))
+        size += bytes_
+    send()
+    print("\nBatches usually finish within an hour (24 hours at most). Check with: python extract.py status")
+    return 0
+
+
+def cmd_status(args) -> int:
+    if not BATCHES.exists():
+        print("No batches submitted yet.")
+        return 0
+    client = client_()
+    for bid, b in json.loads(BATCHES.read_text()).items():
+        r = client.messages.batches.retrieve(bid)
+        c = r.request_counts
+        print(f"{bid}: {r.processing_status}{' (collected)' if b.get('collected') else ''} - {c.processing} processing, "
+              f"{c.succeeded} done, {c.errored} errored, {c.expired} expired")
+    print("When every batch says 'ended', run: python extract.py collect")
+    return 0
+
+
+def cmd_collect(args) -> int:
+    if not BATCHES.exists():
+        print("No batches submitted yet.")
+        return 0
+    state = json.loads(BATCHES.read_text())
+    by_id = {e["id"]: e for e in load_manifest()}
+    client, retry, saved, usd = client_(), [], 0, 0.0
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
+    for bid, b in state.items():
+        if b.get("collected"):
+            continue
+        if client.messages.batches.retrieve(bid).processing_status != "ended":
+            print(f"{bid}: still processing, skipped for now")
+            continue
+        for res in client.messages.batches.results(bid):
+            eid = b["ids"].get(res.custom_id)
+            entry = by_id.get(eid)
+            if entry is None:
+                continue
+            if res.result.type != "succeeded":
+                retry.append(eid)
+                print(f"  {entry['name']}: {res.result.type}, will need a normal run")
+                continue
+            msg = res.result.message
+            usd += _cost(msg.usage)["usd"] / 2
+            fetched: list[dict] = []
+            _save_fetches(msg.content, eid, fetched)
+            try:
+                if msg.stop_reason != "end_turn":
+                    raise ValueError(msg.stop_reason)
+                contract = Contract.model_validate_json(_json_text(msg))
+            except (ValidationError, ValueError) as e:
+                retry.append(eid)
+                print(f"  {entry['name']}: no complete record ({str(e)[:80]}), will need a normal run")
+                continue
+            record = make_record(entry, contract, msg.model, fetched)
+            record.extracted_by += " via batch"
+            (OUT_DIR / f"{eid}.json").write_text(json.dumps(record.model_dump(), indent=2))
+            saved += 1
+        b["collected"] = True
+        BATCHES.write_text(json.dumps(state, indent=1))
+    print(f"\n{saved} records saved, about US${usd:.2f} at batch prices (check console.anthropic.com Usage for the billed amount).")
+    if retry:
+        print(f"{len(retry)} need a normal run (paused online-terms fetches, refusals or incomplete replies):")
+        print(f"  python extract.py run --only \"{','.join(retry)}\" --max-usd {max(10, round(len(retry) * 1.5))}")
+    return 0
 
 
 # ---------------------------------------------------------------- commands
@@ -696,7 +822,7 @@ class BudgetReached(Exception):
 
 def select(manifest: list[dict], args) -> list[dict]:
     todo = [m for m in manifest if m["files"]]
-    if getattr(args, "command", "") in ("run", "estimate"):
+    if getattr(args, "command", "") in ("run", "estimate", "submit"):
         todo = [m for m in todo if agreement_files(m)[0]]
     area = lambda m: " ".join(m["areas"] + m["paths"]).lower()
     if getattr(args, "area", None):
@@ -900,7 +1026,7 @@ def cmd_run(args) -> int:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("command", choices=["plan", "classify", "estimate", "run"])
+    ap.add_argument("command", choices=["plan", "classify", "estimate", "run", "submit", "status", "collect"])
     ap.add_argument("root", nargs="?", type=lambda s: Path(s).expanduser(),
                     help="plan only: local copy of Accounts/Contracts (laid out as area/counterparty)")
     ap.add_argument("--extra", action="append", default=[], type=lambda s: Path(s).expanduser(),
@@ -922,7 +1048,8 @@ def main() -> int:
     if args.command == "plan" and args.root is None:
         print("plan needs the Contracts folder, e.g. python extract.py plan ~/Downloads/contracts/Contracts")
         return 2
-    return {"plan": cmd_plan, "classify": cmd_classify, "estimate": cmd_estimate, "run": cmd_run}[args.command](args)
+    return {"plan": cmd_plan, "classify": cmd_classify, "estimate": cmd_estimate, "run": cmd_run,
+            "submit": cmd_submit, "status": cmd_status, "collect": cmd_collect}[args.command](args)
 
 
 if __name__ == "__main__":
