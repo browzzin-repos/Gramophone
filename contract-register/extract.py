@@ -19,6 +19,7 @@ import argparse
 import base64
 import datetime as dt
 import json
+import os
 import re
 import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -155,7 +156,8 @@ def main() -> int:
         bundles = bundles[: args.limit]
     print(f"{len(bundles)} counterparties to extract")
 
-    client = anthropic.Anthropic()
+    # This cloud environment sets ANTHROPIC_BASE_URL for its own use; always call the public API with your key.
+    client = anthropic.Anthropic(base_url=os.environ.get("CONTRACTS_API_BASE_URL", "https://api.anthropic.com"))
     failures = 0
     with ThreadPoolExecutor(max_workers=args.workers) as pool:
         futures = {pool.submit(extract_one, client, n, p, today): n for n, p in bundles}
