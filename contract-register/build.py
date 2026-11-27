@@ -41,6 +41,11 @@ def derive(rec: dict, today: dt.date) -> dict:
     notice = rec.get("notice_period_days")
     notes: list[str] = []
 
+    # Start and length known but no end date written: derive it.
+    if not end and start and rec.get("initial_term_months"):
+        end = add_months(start, rec["initial_term_months"]) - dt.timedelta(days=1)
+        notes.append("Term end computed from the start date and initial term (not stated in a document).")
+
     # An auto-renewing contract whose term has passed has (presumably) rolled over.
     if rtype == "auto_renew" and end and end < today and rec.get("renewal_term_months"):
         while end < today:
