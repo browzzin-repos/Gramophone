@@ -307,11 +307,12 @@ const money = (v, cur) => v == null ? '—' : (cur === 'AUD' ? 'A$' : cur === 'U
 const audK = v => v == null ? '—' : v >= 1e6 ? 'A$' + (v / 1e6).toFixed(2) + 'm' : 'A$' + Math.round(v / 1000).toLocaleString('en-AU') + 'k';
 const relDays = n => n === 0 ? 'Today' : n === 1 ? 'Tomorrow' : n < 0 ? `${-n} days ago` : n < 60 ? `In ${n} days` : `In ${Math.round(n / 30.4)} months`;
 const urgency = n => n == null ? 'gray' : n <= 45 ? 'red' : n <= 120 ? 'orange' : 'gray';
-const STATUS_PILL = { 'Act now': 'red', 'Term ended': 'red', 'Needs review': 'orange', 'Due soon': 'yellow', 'Active': 'green' };
+const STATUS_PILL = { 'Act now': 'red', 'Term ended': 'red', 'Needs review': 'orange', 'Due soon': 'yellow', 'Active': 'green', 'Superseded': 'gray' };
 const RENEWAL_LABEL = { auto_renew: 'Auto-renews', option_to_extend: 'Option to extend', mutual_agreement: 'Renews by agreement', evergreen: 'Rolling', fixed_term: 'Fixed term', unclear: 'Unclear' };
 const pill = (txt, color) => `<span class="pill ${color}"><i></i>${esc(txt)}</span>`;
 const statusPill = c => pill(c.computed.status, STATUS_PILL[c.computed.status] || 'gray');
 
+const isCurrent = c => c.computed.current !== false;  // not superseded, and not ended more than a year ago
 function needsAction(c) { return ['Act now', 'Term ended', 'Needs review'].includes(c.computed.status) || c.risks.some(r => r.severity === 'high'); }
 function filtered() {
   let list = contracts;
@@ -351,7 +352,7 @@ function header(title, sub) {
 
 function upcomingDeadlines(list, horizonDays = 400) {
   const out = [];
-  for (const c of list) for (const d of c.computed.deadlines) if (d.days >= -120 && d.days <= horizonDays) out.push({ c, d });
+  for (const c of list.filter(isCurrent)) for (const d of c.computed.deadlines) if (d.days >= -120 && d.days <= horizonDays) out.push({ c, d });
   return out.sort((a, b) => a.d.days - b.d.days);
 }
 
@@ -368,24 +369,27 @@ function deadlineRow({ c, d }) {
 function viewOverview() {
   const list = filtered();
   const pays = c => !c.money_direction || c.money_direction === '2XU pays' || c.money_direction === 'both';
-  const totalAud = list.filter(pays).reduce((s, c) => s + (c.computed.annual_value_aud || 0), 0);
-  const recvAud = list.filter(c => c.money_direction === '2XU receives').reduce((s, c) => s + (c.computed.annual_value_aud || 0), 0);
-  const in60 = list.filter(c => c.computed.next_deadline && c.computed.next_deadline.days <= 60).length;
-  const auto = list.filter(c => c.renewal_type === 'auto_renew').length;
-  const review = list.filter(c => ['Term ended', 'Needs review'].includes(c.computed.status)).length;
+  const live = c => !['Term ended', 'Superseded'].includes(c.computed.status);
+  const totalAud = list.filter(c => pays(c) && live(c)).reduce((s, c) => s + (c.computed.annual_value_aud || 0), 0);
+  const recvAud = list.filter(c => c.money_direction === '2XU receives' && live(c)).reduce((s, c) => s + (c.computed.annual_value_aud || 0), 0);
+  const cur = list.filter(isCurrent);
+  const in60 = cur.filter(c => c.computed.next_deadline && c.computed.next_deadline.days <= 60).length;
+  const auto = cur.filter(c => c.renewal_type === 'auto_renew').length;
+  const review = cur.filter(c => ['Term ended', 'Needs review'].includes(c.computed.status)).length;
   const dl = upcomingDeadlines(list).filter(x => x.d.days >= 0).slice(0, 8);
-  const lapsed = list.filter(c => c.computed.status === 'Term ended');
-  return header(state.category || 'Overview', `Renewal and notice dates across ${list.length} contracts, worked out from the signed documents.`) +
+  const yearAgo = new Date(TODAY); yearAgo.setFullYear(yearAgo.getFullYear() - 1);
+  const lapsed = list.filter(c => c.computed.status === 'Term ended' && pd(c.computed.current_term_end) >= yearAgo);
+  return header(state.category || 'Overview', `Renewal and notice dates across ${cur.length} current contracts (${list.length} on file), worked out from the signed documents.`) +
   `<div class="pilot-banner">${ICONS.info}<div>${contracts.length} counterparties from <span class="num">Accounts/Contracts</span>: each record combines the agreement, MSA, SOWs, amendments, side letters and the online terms they incorporate. Every date, fee and exit clause links back to a quote in the source document; open a contract to see them.</div></div>
   <div class="tiles">
     <div class="tile"><div class="k">Annual commitments</div><div class="v num">${audK(totalAud)}</div><div class="s">2XU pays, AUD ex GST${recvAud ? ` · ${audK(recvAud)} receivable` : ''}</div></div>
     <div class="tile ${in60 ? 'alert' : ''}"><div class="k">Deadlines in 60 days</div><div class="v num">${in60}</div><div class="s">notice, extension or exit</div></div>
-    <div class="tile"><div class="k">Open actions</div><div class="v num">${list.reduce((n, c) => n + c.computed.actions.length, 0)}</div><div class="s">${auto} contract${auto === 1 ? '' : 's'} auto-renew</div></div>
+    <div class="tile"><div class="k">Open actions</div><div class="v num">${cur.reduce((n, c) => n + c.computed.actions.length, 0)}</div><div class="s">${auto} contract${auto === 1 ? '' : 's'} auto-renew</div></div>
     <div class="tile ${review ? 'alert' : ''}"><div class="k">Term ended or unclear</div><div class="v num">${review}</div><div class="s">confirm what governs today</div></div>
   </div>
   <section class="section"><div class="section-head"><h3>Upcoming deadlines</h3><span>Next 13 months</span></div>
     <div class="list">${dl.map(deadlineRow).join('') || '<div class="empty">No upcoming deadlines</div>'}</div></section>
-  ${lapsed.length ? `<section class="section"><div class="section-head"><h3>Term has ended</h3><span>No newer document on file</span></div>
+  ${lapsed.length ? `<section class="section"><div class="section-head"><h3>Term ended in the last 12 months</h3><span>No newer document on file</span></div>
     <div class="list">${lapsed.map(c => deadlineRow({ c, d: c.computed.deadlines[c.computed.deadlines.length - 1] })).join('')}</div></section>` : ''}
   ${list.some(c => c.computed.status === 'Needs review') ? `<section class="section"><div class="section-head"><h3>No renewal date on file</h3><span>Renewal terms missing or unclear</span></div>
     <div class="list">${list.filter(c => c.computed.status === 'Needs review').map(c => `<button class="row" data-id="${c.id}" aria-current="${state.selected === c.id}">
@@ -456,8 +460,8 @@ function exitSummary(c) {
   return r.length ? r.map(x => `${ROUTE_LABEL[x.route]}: ${/^none\b/i.test(x.notice) ? 'no notice needed' : x.notice}`).join(' · ') : (c.termination_for_convenience || null);
 }
 function viewTerms() {
-  const list = [...filtered()].sort((a, b) => a.counterparty.localeCompare(b.counterparty));
-  return header('Term Comparison', 'The key terms of every agreement side by side. Hover a cell for the full text; click a row for the clauses and quotes.') +
+  const list = [...filtered()].filter(isCurrent).sort((a, b) => a.counterparty.localeCompare(b.counterparty));
+  return header('Term Comparison', 'The key terms of every current agreement side by side (superseded and long-expired ones are under All Contracts). Hover a cell for the full text; click a row for the clauses and quotes.') +
   `<div class="table-wrap terms"><table><thead><tr><th>Counterparty</th><th>Term &amp; renewal</th><th>Notice</th><th>How 2XU can exit</th><th>They can terminate</th><th>Payment</th><th>Price &amp; terms changes</th><th>Minimum commitment</th><th>Liability cap</th><th>Assignment / change of control</th><th>Governing law</th><th>Gaps</th></tr></thead>
   <tbody>${list.map(c => `<tr data-id="${c.id}" aria-current="${state.selected === c.id}" tabindex="0">
     <td class="cp"><b>${esc(c.counterparty)}</b><span>${esc(c.category)}${c.money_direction && c.money_direction !== '2XU pays' ? ' · ' + esc(c.money_direction) : ''}</span></td>

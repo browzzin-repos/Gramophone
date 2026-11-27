@@ -13,6 +13,7 @@ import argparse
 import calendar
 import datetime as dt
 import json
+import re
 from pathlib import Path
 
 HERE = Path(__file__).parent
@@ -192,6 +193,37 @@ def ap_terms(rec: dict) -> dict:
     }
 
 
+STOP = {"pty", "ltd", "limited", "inc", "llc", "group", "the", "and", "co", "of", "gmbh", "sa", "ab", "plc"}
+
+
+def norm(name: str) -> str:
+    return "".join(w for w in re.findall(r"[a-z0-9]+", (name or "").lower().replace("&", " and ")) if w not in STOP)
+
+
+def supersede(records: list[dict]) -> None:
+    """Several records for one counterparty (yearly athlete deals, an old SOW and its replacement): the most recent is
+    live; an older one is marked Superseded when its term has ended or it starts and ends no later than the live one.
+    Parallel agreements that run past the live one stay as they are."""
+    groups: dict[str, list[dict]] = {}
+    for r in records:
+        groups.setdefault(norm(r["counterparty"]), []).append(r)
+    for rs in groups.values():
+        if len(rs) < 2:
+            continue
+        start = lambda r: r["computed"]["current_term_start"] or r.get("effective_date") or ""
+        end = lambda r: r["computed"]["current_term_end"] or ""
+        primary = max(rs, key=lambda r: (start(r), end(r), any(d["signed"] for d in r["documents"]), len(r["documents"])))
+        for r in rs:
+            if r is primary:
+                continue
+            if r["computed"]["status"] == "Term ended" or (start(r) <= start(primary) and end(r) <= end(primary)):
+                c = r["computed"]
+                c["status"] = "Superseded"
+                c["superseded_by"] = primary["id"]
+                c["actions"] = []
+                c["computed_notes"].append(f"Superseded by the later record for {primary['counterparty']} ({primary['id']}).")
+
+
 def write_ics(records: list[dict], path: Path) -> None:
     lines = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//2XU//Contract Register//EN", "X-WR-CALNAME:2XU contract deadlines"]
     for rec in records:
@@ -240,7 +272,15 @@ def main() -> None:
         rec["computed"]["ap"] = ap_terms(rec)
         records.append(rec)
 
-    order = {"Term ended": 0, "Act now": 1, "Needs review": 2, "Due soon": 3, "Active": 4}
+    supersede(records)
+    # Contracts that ended more than a year ago are history: keep the record, drop its actions.
+    year_ago = (today - dt.timedelta(days=365)).isoformat()
+    for r in records:
+        c = r["computed"]
+        c["current"] = c["status"] != "Superseded" and not (c["status"] == "Term ended" and (c["current_term_end"] or "") < year_ago)
+        if not c["current"]:
+            c["actions"] = [a for a in c["actions"] if a["source"] == "manual"]
+    order = {"Term ended": 0, "Act now": 1, "Needs review": 2, "Due soon": 3, "Active": 4, "Superseded": 5}
     records.sort(key=lambda r: (order[r["computed"]["status"]],
                                 r["computed"]["next_deadline"]["days"] if r["computed"]["next_deadline"] else 10**6))
 
