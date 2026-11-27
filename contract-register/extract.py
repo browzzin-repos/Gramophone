@@ -26,6 +26,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 import anthropic
+from pydantic import ValidationError
 
 from schema import Contract, ContractRecord
 
@@ -109,35 +110,66 @@ def build_content(name: str, pdfs: list[Path], today: str) -> list[dict]:
     return content
 
 
-def extract_one(client: anthropic.Anthropic, name: str, pdfs: list[Path], today: str) -> ContractRecord:
-    response = client.beta.messages.parse(
-        model=MODEL,
-        max_tokens=16000,
-        betas=["server-side-fallback-2026-07-01"],
-        fallbacks="default",  # re-run on a fallback model if a safety classifier declines
-        thinking={"type": "adaptive"},
-        output_config={"effort": "high"},
-        system=SYSTEM,
-        messages=[{"role": "user", "content": build_content(name, pdfs, today)}],
-        output_format=Contract,
-    )
-    if response.stop_reason == "refusal":
-        raise RuntimeError(f"{name}: request declined ({response.stop_details})")
-    if response.stop_reason == "max_tokens" or response.parsed_output is None:
-        raise RuntimeError(f"{name}: no complete record returned (stop_reason={response.stop_reason})")
-    contract: Contract = response.parsed_output
-    data = contract.model_dump()
-    # Free-text fields come back as "" when not stated (see schema.py); store them as None.
-    for k, v in data.items():
-        if isinstance(v, str) and not v.strip() and ContractRecord.model_fields[k].default is None:
-            data[k] = None
-    return ContractRecord(
-        **data,
+# Opus 5.5 list prices, US$ per million tokens (input, output). Used only for the cost printout.
+PRICE_IN, PRICE_OUT = 4.00, 20.00
+
+# The record schema is too large for API-side structured outputs ("Schema is too complex"), so the
+# schema goes in the prompt and the reply is validated here with pydantic, with one correction round.
+SCHEMA_TEXT = json.dumps(Contract.model_json_schema(), separators=(",", ":"))
+FORMAT_NOTE = (
+    "Reply with only the register record as one JSON object that validates against this JSON Schema. "
+    "No prose and no code fences. Use null for anything the documents do not state.\n" + SCHEMA_TEXT
+)
+
+
+def _json_text(response) -> str:
+    text = "".join(b.text for b in response.content if b.type == "text").strip()
+    if text.startswith("```"):
+        text = text.split("\n", 1)[1].rsplit("```", 1)[0]
+    return text[text.find("{"): text.rfind("}") + 1]
+
+
+def extract_one(client: anthropic.Anthropic, name: str, pdfs: list[Path], today: str) -> tuple[ContractRecord, dict]:
+    messages = [{"role": "user", "content": build_content(name, pdfs, today) + [{"type": "text", "text": FORMAT_NOTE}]}]
+    usage = {"input": 0, "output": 0}
+    for attempt in range(2):
+        with client.beta.messages.stream(
+            model=MODEL,
+            max_tokens=32000,
+            betas=["server-side-fallback-2026-07-01"],
+            fallbacks="default",  # re-run on a fallback model if a safety classifier declines
+            thinking={"type": "adaptive"},
+            output_config={"effort": "high"},
+            system=SYSTEM,
+            messages=messages,
+        ) as stream:
+            response = stream.get_final_message()
+        u = response.usage
+        usage["input"] += u.input_tokens + (u.cache_creation_input_tokens or 0) + (u.cache_read_input_tokens or 0)
+        usage["output"] += u.output_tokens
+        if response.stop_reason == "refusal":
+            raise RuntimeError(f"{name}: request declined ({response.stop_details})")
+        if response.stop_reason == "max_tokens":
+            raise RuntimeError(f"{name}: reply cut off at max_tokens")
+        try:
+            contract = Contract.model_validate_json(_json_text(response))
+            break
+        except ValidationError as e:
+            if attempt == 1:
+                raise RuntimeError(f"{name}: reply did not match the schema after a correction round: {e}") from e
+            messages += [
+                {"role": "assistant", "content": response.content},
+                {"role": "user", "content": f"That JSON does not validate:\n{e}\nReply with the corrected JSON object only."},
+            ]
+    usage["usd"] = round(usage["input"] / 1e6 * PRICE_IN + usage["output"] / 1e6 * PRICE_OUT, 4)
+    record = ContractRecord(
+        **contract.model_dump(),
         id=slug(name),
         source_folder=name,
         extracted_by=f"Claude API ({response.model})",
         extracted_at=dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
     )
+    return record, usage
 
 
 def main() -> int:
@@ -164,12 +196,13 @@ def main() -> int:
     # This cloud environment sets ANTHROPIC_BASE_URL for its own use; always call the public API with your key.
     client = anthropic.Anthropic(base_url=os.environ.get("CONTRACTS_API_BASE_URL", "https://api.anthropic.com"))
     failures = 0
+    totals = {"input": 0, "output": 0, "usd": 0.0}
     with ThreadPoolExecutor(max_workers=args.workers) as pool:
         futures = {pool.submit(extract_one, client, n, p, today): n for n, p in bundles}
         for fut in as_completed(futures):
             name = futures[fut]
             try:
-                record = fut.result()
+                record, usage = fut.result()
             except anthropic.RateLimitError as e:
                 failures += 1
                 print(f"  RATE LIMITED  {name}: {e}  (re-run to resume)")
@@ -184,7 +217,12 @@ def main() -> int:
                 print(f"  FAILED  {e}")
             else:
                 (OUT_DIR / f"{record.id}.json").write_text(json.dumps(record.model_dump(), indent=2))
-                print(f"  ok  {name}  ({record.confidence} confidence, {len(record.risks)} risks)")
+                for k in ("input", "output", "usd"):
+                    totals[k] += usage[k]
+                print(f"  ok  {name}  ({record.confidence} confidence, {len(record.risks)} risks)  "
+                      f"{usage['input']:,} in / {usage['output']:,} out tokens  US${usage['usd']:.2f}")
+    print(f"Total: {totals['input']:,} input + {totals['output']:,} output tokens, about US${totals['usd']:.2f} "
+          f"(Opus 5.5 list price; check console.anthropic.com Usage for the billed amount)")
     return 1 if failures else 0
 
 
