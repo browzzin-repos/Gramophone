@@ -534,7 +534,16 @@ def select(manifest: list[dict], args) -> list[dict]:
 
 def client_() -> anthropic.Anthropic:
     # Cloud sessions set ANTHROPIC_BASE_URL for their own use; always call the public API with your key.
-    return anthropic.Anthropic(base_url=os.environ.get("CONTRACTS_API_BASE_URL", "https://api.anthropic.com"))
+    client = anthropic.Anthropic(base_url=os.environ.get("CONTRACTS_API_BASE_URL", "https://api.anthropic.com"))
+    try:  # one free call to check the key before doing anything else
+        client.messages.count_tokens(model=MODEL, messages=[{"role": "user", "content": "key check"}])
+    except anthropic.AuthenticationError:
+        key = os.environ.get("ANTHROPIC_API_KEY", "")
+        hint = (" It contains a line break or space: reload it with "
+                'export ANTHROPIC_API_KEY="$(pbpaste | tr -d \'\\r\\n \')"' if re.search(r"\s", key) else
+                " The key may have been deleted or mistyped: create a new one at console.anthropic.com > API Keys.")
+        raise SystemExit("The API rejected your key (invalid x-api-key)." + (hint if key else " ANTHROPIC_API_KEY is not set."))
+    return client
 
 
 def cmd_plan(args) -> int:
