@@ -46,7 +46,8 @@ from pydantic import ValidationError
 from schema import Contract, ContractRecord
 
 MODEL = "claude-opus-5-5"
-MAX_REQUEST_BYTES = 28 * 1024 * 1024  # API limit is 32 MB per request; leave headroom for base64
+MAX_REQUEST_BYTES = 28 * 1024 * 1024
+MAX_PDF_PAGES = 560  # API limit is 600 PDF pages per request; page counts below are estimates  # API limit is 32 MB per request; leave headroom for base64
 HERE = Path(__file__).parent
 DATA = HERE / "data"
 OUT_DIR = DATA / "records"
@@ -373,17 +374,32 @@ def docx_text(path: Path) -> str:
     return html.unescape(re.sub(r"<[^>]+>", "", xml)).strip()
 
 
+def pdf_pages(path: Path) -> int:
+    """Page count: pypdf if installed, else count page objects, else ~60 KB per page."""
+    try:
+        import pypdf  # optional
+        return len(pypdf.PdfReader(str(path)).pages)
+    except Exception:
+        pass
+    data = path.read_bytes()
+    n = len(re.findall(rb"/Type\s*/Page(?![a-zA-Z])", data))
+    return n or max(1, len(data) // 60_000)
+
+
 def build_content(entry: dict, today: str) -> list[dict]:
     files = [(Path(f["path"]), f["title"]) for f in entry["files"]]
     # Fit the request: signed/executed PDFs and newer files first; present the chosen ones oldest first.
     rank = lambda ft: (not re.search(r"sign|execut|complet|final", ft[0].name, re.I), ft[0].suffix.lower() != ".pdf", -ft[0].stat().st_mtime)
-    chosen, left_out, total = [], [], 0
+    chosen, left_out, total, pages = [], [], 0, 0
     for f, title in sorted(files, key=rank):
-        size = f.stat().st_size * 4 // 3 if f.suffix.lower() in PDF else f.stat().st_size // 4
-        if total + size > MAX_REQUEST_BYTES:
+        is_pdf = f.suffix.lower() in PDF
+        size = f.stat().st_size * 4 // 3 if is_pdf else f.stat().st_size // 4
+        n = pdf_pages(f) if is_pdf else 0
+        if total + size > MAX_REQUEST_BYTES or pages + n > MAX_PDF_PAGES:
             left_out.append(title)
             continue
         total += size
+        pages += n
         chosen.append((f, title))
     content: list[dict] = []
     for f, title in sorted(chosen, key=lambda ft: ft[0].stat().st_mtime):
