@@ -22,6 +22,7 @@ import json
 import os
 import re
 import sys
+import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
@@ -172,6 +173,10 @@ def extract_one(client: anthropic.Anthropic, name: str, pdfs: list[Path], today:
     return record, usage
 
 
+class BudgetReached(Exception):
+    pass
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("root", type=Path)
@@ -179,6 +184,8 @@ def main() -> int:
     ap.add_argument("--limit", type=int)
     ap.add_argument("--force", action="store_true")
     ap.add_argument("--workers", type=int, default=4)
+    ap.add_argument("--max-usd", type=float, default=50.0,
+                    help="Stop starting new counterparties once estimated spend in this run reaches this (default 50)")
     args = ap.parse_args()
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -197,12 +204,29 @@ def main() -> int:
     client = anthropic.Anthropic(base_url=os.environ.get("CONTRACTS_API_BASE_URL", "https://api.anthropic.com"))
     failures = 0
     totals = {"input": 0, "output": 0, "usd": 0.0}
+    skipped = 0
+    lock = threading.Lock()
+
+    def run(name: str, pdfs: list[Path]):
+        # Checked when a worker picks up the next counterparty; ones already running still finish.
+        with lock:
+            if totals["usd"] >= args.max_usd:
+                raise BudgetReached
+        record, usage = extract_one(client, name, pdfs, today)
+        with lock:
+            for k in ("input", "output", "usd"):
+                totals[k] += usage[k]
+        return record, usage
+
     with ThreadPoolExecutor(max_workers=args.workers) as pool:
-        futures = {pool.submit(extract_one, client, n, p, today): n for n, p in bundles}
+        futures = {pool.submit(run, n, p): n for n, p in bundles}
         for fut in as_completed(futures):
             name = futures[fut]
             try:
                 record, usage = fut.result()
+            except BudgetReached:
+                skipped += 1
+                continue
             except anthropic.RateLimitError as e:
                 failures += 1
                 print(f"  RATE LIMITED  {name}: {e}  (re-run to resume)")
@@ -217,13 +241,14 @@ def main() -> int:
                 print(f"  FAILED  {e}")
             else:
                 (OUT_DIR / f"{record.id}.json").write_text(json.dumps(record.model_dump(), indent=2))
-                for k in ("input", "output", "usd"):
-                    totals[k] += usage[k]
                 print(f"  ok  {name}  ({record.confidence} confidence, {len(record.risks)} risks)  "
                       f"{usage['input']:,} in / {usage['output']:,} out tokens  US${usage['usd']:.2f}")
     print(f"Total: {totals['input']:,} input + {totals['output']:,} output tokens, about US${totals['usd']:.2f} "
           f"(Opus 5.5 list price; check console.anthropic.com Usage for the billed amount)")
-    return 1 if failures else 0
+    if skipped:
+        print(f"Spend cap of US${args.max_usd:.2f} reached: {skipped} counterparties not started. "
+              f"Re-run the same command (with a higher --max-usd if needed) to continue.")
+    return 1 if failures or skipped else 0
 
 
 if __name__ == "__main__":
