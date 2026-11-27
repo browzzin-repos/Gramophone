@@ -47,6 +47,13 @@ def derive(rec: dict, today: dt.date) -> dict:
             start = end + dt.timedelta(days=1)
             end = add_months(start, rec["renewal_term_months"]) - dt.timedelta(days=1)
         notes.append("Term rolled forward by the auto-renewal clause (computed, not from a document).")
+    # If this term's cancel-by date has already passed, the next decision is for the following term.
+    if rtype == "auto_renew" and end and notice is not None and rec.get("renewal_term_months"):
+        while end - dt.timedelta(days=notice) < today:
+            start = end + dt.timedelta(days=1)
+            end = add_months(start, rec["renewal_term_months"]) - dt.timedelta(days=1)
+            if "Cancel-by date for this term has passed; showing the next term." not in notes:
+                notes.append("Cancel-by date for this term has passed; showing the next term.")
 
     deadlines: list[dict] = []
     if end:
