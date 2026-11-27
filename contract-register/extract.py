@@ -258,7 +258,7 @@ def plan(roots: list[tuple[Path, str]]) -> list[dict]:
 
     manifest = []
     for g in groups.values():
-        files, skipped = collect_files(g["src"])
+        files, skipped = collect_files(g["src"], exclude)
         manifest.append({
             "id": slug(g["name"]), "name": g["name"], "areas": sorted(set(g["areas"])), "paths": g["paths"],
             "files": files, "bytes": sum(Path(f["path"]).stat().st_size for f in files), "skipped": skipped,
@@ -272,12 +272,17 @@ def plan(roots: list[tuple[Path, str]]) -> list[dict]:
     return sorted(manifest, key=lambda m: m["name"].lower())
 
 
-def collect_files(src: list[tuple[str, str]]) -> tuple[list[dict], list[str]]:
+def collect_files(src: list[tuple[str, str]], exclude: set | None = None) -> tuple[list[dict], list[str]]:
+    """Readable files under each source path. Exclude patterns (data/grouping.json) apply to files and sub-folders too."""
+    pats = [p for p in (exclude or ()) if "*" in p]
     files, skipped, seen = [], [], set()
     for root, base in src:
         root, base = Path(root), Path(base)
         for f in ([base] if base.is_file() else sorted(base.rglob("*"))):
             if not wanted_file(f) or "__MACOSX" in f.parts:
+                continue
+            d = disp(root, f)
+            if any(glob_match(p, d) for p in pats) or any(part in (exclude or ()) for part in f.relative_to(root).parts):
                 continue
             key = (f.name.lower(), f.stat().st_size)
             if key in seen:
