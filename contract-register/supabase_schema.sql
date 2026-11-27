@@ -1,4 +1,4 @@
--- Contract register tables for 2XU Supabase. NOT applied yet: review, then run as a migration.
+-- Contract register tables for 2XU Supabase. Applied 27 Nov 2026 (new schema only; nothing existing changed).
 -- Purpose: one shared source for the contract dashboard and the AP tool.
 -- The AP tool joins invoices to contracts.ap_expected on the AP21 supplier code.
 create schema if not exists contracts;
@@ -47,7 +47,7 @@ create table if not exists contracts.action (
 );
 
 -- What AP should see on an invoice. One row per contract with a supplier code.
-create or replace view contracts.ap_expected as
+create or replace view contracts.ap_expected with (security_invoker = true) as
 select c.ap21_supplier_code,
        c.id as contract_id,
        c.counterparty,

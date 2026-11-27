@@ -218,6 +218,16 @@ dl.kv > div + div{border-top:1px solid var(--sep)}
 .meter i.on{background:var(--green)}
 .tick{width:16px;height:16px;border-radius:50%;display:grid;place-items:center;font-size:10px;font-weight:700;flex:none;margin-top:1px;background:var(--red-soft);color:var(--red)}
 .tick.ok{background:var(--green-soft);color:var(--green)}
+.admin-row{display:grid;grid-template-columns:minmax(0,1fr) minmax(140px,220px) auto minmax(0,150px);gap:12px;align-items:center;padding:11px 16px;position:relative}
+.admin-row+.admin-row{border-top:1px solid var(--sep)}
+.admin-row .t{font-weight:600}.admin-row .d{color:var(--label-2);font-size:12.5px}
+.admin-row input{font:inherit;color:var(--label);background:var(--fill-2);border:1px solid transparent;border-radius:var(--r-sm);padding:6px 10px;min-width:0;width:100%}
+.admin-row input:focus{outline:0;border-color:var(--accent);background:var(--surface)}
+.btn{border:0;background:var(--accent);color:#fff;font-weight:600;font-size:13px;border-radius:var(--r-sm);padding:6px 14px}
+.btn:disabled,.admin-row input:disabled{opacity:.5}
+.save-note{font-size:12px;color:var(--label-2)}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+@media (max-width:760px){.admin-row{grid-template-columns:minmax(0,1fr) auto}.admin-row>div:first-child,.save-note{grid-column:1/-1}}
 .prov{font-size:11.5px;color:var(--label-3);padding:0 4px;line-height:1.5}
 .empty{padding:40px;text-align:center;color:var(--label-3)}
 
@@ -278,6 +288,7 @@ const ICONS = {
   calendar:'<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="1.8" y="2.8" width="12.4" height="11.4" rx="2"/><path d="M1.8 6.4h12.4M5 1.4v2.6M11 1.4v2.6" stroke-linecap="round"/></svg>',
   folder:'<svg viewBox="0 0 16 16" fill="currentColor" opacity=".85"><path d="M1.5 4.2c0-.9.7-1.6 1.6-1.6h3l1.4 1.5h5.4c.9 0 1.6.7 1.6 1.6v6.6c0 .9-.7 1.6-1.6 1.6H3.1c-.9 0-1.6-.7-1.6-1.6V4.2Z"/></svg>',
   pdf:'<svg viewBox="0 0 18 22" fill="none"><path d="M2 1h9.5L17 6.5V20a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1Z" fill="var(--surface)" stroke="var(--sep)"/><rect x="0" y="11" width="13" height="6" rx="1.5" fill="currentColor"/><text x="6.5" y="15.6" font-size="4.6" font-weight="700" fill="#fff" text-anchor="middle" font-family="-apple-system,Arial">PDF</text></svg>',
+  admin:'<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="8" cy="5.2" r="2.7"/><path d="M2.6 14c.5-2.8 2.7-4.3 5.4-4.3s4.900 1.500 5.400 4.300" stroke-linecap="round"/></svg>',
   chev:'<svg class="chev" viewBox="0 0 8 13" fill="none" stroke="currentColor" stroke-width="2"><path d="m1.5 1.5 5 5-5 5" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   close:'<svg viewBox="0 0 10 10" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="m1.5 1.5 7 7m0-7-7 7"/></svg>',
   info:'<svg viewBox="0 0 16 16" fill="currentColor"><circle cx="8" cy="8" r="7"/><path d="M8 7v4.2" stroke="#fff" stroke-width="1.6" stroke-linecap="round"/><circle cx="8" cy="4.8" r=".95" fill="#fff"/></svg>'
@@ -317,7 +328,8 @@ function renderNav() {
     ['overview', 'Overview', ICONS.overview, ''],
     ['all', 'All Contracts', ICONS.all, contracts.length],
     ['action', 'Actions', ICONS.action, actions],
-    ['calendar', 'Renewal Calendar', ICONS.calendar, '']
+    ['calendar', 'Renewal Calendar', ICONS.calendar, ''],
+    ['admin', 'Admin', ICONS.admin, '']
   ];
   document.getElementById('nav-main').innerHTML = items.map(([id, label, icon, n]) =>
     `<button class="side-item" data-view="${id}" aria-current="${state.view === id && !state.category}">${icon}<span>${label}</span><span class="count ${id === 'action' && n ? 'alert' : ''}">${n}</span></button>`).join('');
@@ -329,7 +341,7 @@ function renderNav() {
 
 /* ---------- views ---------- */
 function header(title, sub) {
-  const views = [['overview', 'Overview'], ['all', 'All'], ['action', 'Actions'], ['calendar', 'Calendar']];
+  const views = [['overview', 'Overview'], ['all', 'All'], ['action', 'Actions'], ['calendar', 'Calendar'], ['admin', 'Admin']];
   return `<div class="mobile-nav">${views.map(([v, l]) => `<button data-view="${v}" aria-pressed="${state.view === v}">${l}</button>`).join('')}</div>
   <div class="large-title"><div><h1>${esc(title)}</h1><p>${sub}</p></div></div>`;
 }
@@ -541,14 +553,55 @@ function healthChecks(c) {
   return `<div><div class="group-title">Record checks · ${h.score}/${h.total}</div><div class="kv">${h.checks.map(x => `<div class="risk"><span class="tick ${x.ok ? 'ok' : ''}">${x.ok ? '✓' : '✕'}</span><span>${esc(x.label)}</span></div>`).join('')}</div></div>`;
 }
 
+/* ---------- admin: contract owners, saved in the page's shared store ---------- */
+const store = { db: null, canEdit: false, ready: false, note: {} };
+function viewAdmin() {
+  const msg = !store.ready ? 'Connecting to the shared store…' : !store.db ? 'Owner changes are not available in this view. Open the page signed in to claude.ai.' : !store.canEdit ? 'You can see owners here. Only editors of this page can change them.' : 'Changes save for everyone who opens this page.';
+  return header('Admin', 'Who owns each contract. Owners get the actions and deadline reminders.') +
+  `<div class="pilot-banner">${ICONS.info}<div>${msg}</div></div>
+  <section class="section"><div class="section-head"><h3>Contract owners</h3><span>${contracts.filter(c => !c.owner).length} unassigned</span></div>
+  <div class="list">${contracts.map(c => `<form class="admin-row" data-owner-form="${c.id}">
+    <div style="min-width:0"><div class="t">${esc(c.counterparty)}</div><div class="d">${esc(c.category)}${c.signed_for_2xu_by ? ' · signed by ' + esc(c.signed_for_2xu_by) : ''}</div></div>
+    <label class="sr" for="owner-${c.id}">Owner of ${esc(c.counterparty)}</label>
+    <input id="owner-${c.id}" name="owner" type="text" value="${esc(c.owner || '')}" placeholder="Unassigned" autocomplete="off" ${store.canEdit ? '' : 'disabled'}>
+    <button class="btn" type="submit" ${store.canEdit ? '' : 'disabled'}>Save</button>
+    <span class="save-note" id="note-${c.id}">${esc(store.note[c.id] || '')}</span>
+  </form>`).join('')}</div></section>`;
+}
+document.addEventListener('submit', async e => {
+  const f = e.target.closest('[data-owner-form]'); if (!f) return;
+  e.preventDefault();
+  const id = f.dataset.ownerForm, owner = f.owner.value.trim().slice(0, 80);
+  if (!store.db || !store.canEdit) return;
+  store.note[id] = 'Saving…'; document.getElementById('note-' + id).textContent = 'Saving…';
+  try { await store.db.doc('owners/' + id).set({ owner, updatedAt: new Date().toISOString() }); store.note[id] = owner ? 'Saved' : 'Saved as unassigned'; }
+  catch (err) { store.note[id] = 'Could not save. You may not have edit access.'; }
+  const n = document.getElementById('note-' + id); if (n) n.textContent = store.note[id];
+});
+function applyOwners(docs) {
+  for (const d of docs) { const c = contracts.find(x => x.id === d.id); const v = d.data(); if (!c || !v) continue; c.owner = typeof v.owner === 'string' && v.owner ? v.owner.slice(0, 80) : null; c.owner_status = 'confirmed'; }
+  const a = document.activeElement; if (!(a && a.closest && a.closest('[data-owner-form]'))) render();
+}
+(async () => {
+  const done = () => { store.ready = true; if (state.view === 'admin') render(); };
+  const timer = setTimeout(done, 10000);
+  try {
+    const [db, user] = await Promise.all([window.claude?.use?.('db') ?? null, window.claude?.use?.('user') ?? null]);
+    store.db = db; store.canEdit = !!db && ((await user?.canEdit()) ?? false);
+    if (db) db.collection('owners').onSnapshot(snap => { clearTimeout(timer); store.ready = true; applyOwners(snap.docs); }, () => { clearTimeout(timer); done(); });
+    else { clearTimeout(timer); done(); }
+  } catch (e) { clearTimeout(timer); done(); }
+})();
+
 /* ---------- render ---------- */
 function render() {
   renderNav();
-  const titles = { overview: 'Overview', all: 'All Contracts', action: 'Actions', calendar: 'Renewal Calendar' };
+  const titles = { overview: 'Overview', all: 'All Contracts', action: 'Actions', calendar: 'Renewal Calendar', admin: 'Admin' };
   let html;
   if (state.view === 'overview') html = viewOverview();
   else if (state.view === 'calendar') html = viewCalendar();
   else if (state.view === 'action') html = viewActions();
+  else if (state.view === 'admin') html = viewAdmin();
   else html = viewTable(state.category || 'All Contracts', 'Sorted by the next date someone has to act on. Click a column to re-sort.');
   document.getElementById('content').innerHTML = html;
   document.getElementById('toolbar-title').textContent = state.category || titles[state.view];
