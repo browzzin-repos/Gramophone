@@ -126,8 +126,13 @@ def extract_one(client: anthropic.Anthropic, name: str, pdfs: list[Path], today:
     if response.stop_reason == "max_tokens" or response.parsed_output is None:
         raise RuntimeError(f"{name}: no complete record returned (stop_reason={response.stop_reason})")
     contract: Contract = response.parsed_output
+    data = contract.model_dump()
+    # Free-text fields come back as "" when not stated (see schema.py); store them as None.
+    for k, v in data.items():
+        if isinstance(v, str) and not v.strip() and ContractRecord.model_fields[k].default is None:
+            data[k] = None
     return ContractRecord(
-        **contract.model_dump(),
+        **data,
         id=slug(name),
         source_folder=name,
         extracted_by=f"Claude API ({response.model})",
