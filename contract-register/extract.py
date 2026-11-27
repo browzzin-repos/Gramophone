@@ -624,7 +624,7 @@ def cmd_plan(args) -> int:
 TOKENS_PER_PAGE = 2500  # PDF text plus page image; Anthropic's guide gives 1,500-3,000 per page
 
 
-def quick_estimate(todo: list[dict]) -> int:
+def quick_estimate(todo: list[dict], top_files: int = 0) -> int:
     """Offline estimate from page counts within each request's limits. Fast, no upload."""
     rows = []
     for e in todo:
@@ -643,6 +643,13 @@ def quick_estimate(todo: list[dict]) -> int:
                 except Exception:
                     pass
         rows.append((e["name"], pages * TOKENS_PER_PAGE + text_tokens + 12000, pages))
+    if top_files:  # the individual files with the most pages, to spot documents that are not agreements
+        sizes = sorted(((pdf_pages(Path(f["path"])), f["title"]) for e in todo for f in e["files"] if f["path"].lower().endswith(".pdf")),
+                       reverse=True)[:top_files]
+        print(f"Largest {len(sizes)} PDF files by pages:")
+        for pg, title in sizes:
+            print(f"  {pg:4} pages  {title[:150]}")
+        print()
     n, tokens = len(rows), sum(r[1] for r in rows)
     for name, t, pg in sorted(rows, key=lambda r: -r[1])[:10]:
         print(f"  {name}: ~{t:,} tokens ({pg} PDF pages)")
@@ -657,7 +664,7 @@ def cmd_estimate(args) -> int:
     manifest = load_manifest()
     todo = select(manifest, args)
     if args.quick:
-        return quick_estimate(todo)
+        return quick_estimate(todo, args.top_files)
     client, today = client_(), dt.date.today().isoformat()
     counts: dict[str, int] = {}
 
@@ -754,6 +761,7 @@ def main() -> int:
     ap.add_argument("--no-web", action="store_true", help="Do not fetch online terms")
     ap.add_argument("--area", help="Only counterparties whose folder or area contains this text, e.g. Leases")
     ap.add_argument("--skip-area", help="Leave out counterparties whose folder or area contains this text, e.g. Leases")
+    ap.add_argument("--top-files", type=int, default=0, help="estimate --quick only: list the N largest PDF files by pages")
     ap.add_argument("--quick", action="store_true", help="estimate only: count pages locally instead of asking the API (fast)")
     ap.add_argument("--include-dormant", action="store_true", help="Also extract counterparties with no recent activity or documents")
     args = ap.parse_args()
