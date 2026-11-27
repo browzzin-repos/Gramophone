@@ -611,9 +611,40 @@ def cmd_plan(args) -> int:
     return 0
 
 
+TOKENS_PER_PAGE = 2500  # PDF text plus page image; Anthropic's guide gives 1,500-3,000 per page
+
+
+def quick_estimate(todo: list[dict]) -> int:
+    """Offline estimate from page counts within each request's limits. Fast, no upload."""
+    rows = []
+    for e in todo:
+        files = [Path(f["path"]) for f in e["files"]]
+        rank = lambda f: (not re.search(r"sign|execut|complet|final", f.name, re.I), f.suffix.lower() != ".pdf", -f.stat().st_mtime)
+        pages, size, text_tokens = 0, 0, 0
+        for f in sorted(files, key=rank):
+            if f.suffix.lower() in PDF:
+                n, b = pdf_pages(f), f.stat().st_size * 4 // 3
+                if pages + n > MAX_PDF_PAGES or size + b > MAX_REQUEST_BYTES:
+                    continue
+                pages, size = pages + n, size + b
+            else:
+                text_tokens += f.stat().st_size // 8  # Word files: mostly XML; text is a fraction of the size
+        rows.append((e["name"], pages * TOKENS_PER_PAGE + text_tokens + 12000, pages))
+    n, tokens = len(rows), sum(r[1] for r in rows)
+    for name, t, pg in sorted(rows, key=lambda r: -r[1])[:10]:
+        print(f"  {name}: ~{t:,} tokens ({pg} PDF pages)")
+    low = (tokens * 0.6 * PRICE_IN + n * 8000 * PRICE_OUT) / 1e6
+    high = (tokens * 1.2 * PRICE_IN + n * (16000 * PRICE_OUT + 40000 * PRICE_IN)) / 1e6
+    print(f"\n{n} counterparties, about {sum(r[2] for r in rows):,} PDF pages and ~{tokens:,} input tokens. "
+          f"Estimated cost US${low:.0f}-{high:.0f} (quick estimate from page counts; run without --quick for an exact token count).")
+    return 0
+
+
 def cmd_estimate(args) -> int:
     manifest = load_manifest()
     todo = select(manifest, args)
+    if args.quick:
+        return quick_estimate(todo)
     client, today = client_(), dt.date.today().isoformat()
     counts: dict[str, int] = {}
 
@@ -708,6 +739,7 @@ def main() -> int:
     ap.add_argument("--max-usd", type=float, default=50.0,
                     help="Stop starting new counterparties once estimated spend in this run reaches this (default 50)")
     ap.add_argument("--no-web", action="store_true", help="Do not fetch online terms")
+    ap.add_argument("--quick", action="store_true", help="estimate only: count pages locally instead of asking the API (fast)")
     ap.add_argument("--include-dormant", action="store_true", help="Also extract counterparties with no recent activity or documents")
     args = ap.parse_args()
     if args.command == "plan" and args.root is None:
