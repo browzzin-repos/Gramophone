@@ -28,6 +28,7 @@ from __future__ import annotations
 import argparse
 import base64
 import csv
+import fnmatch
 import datetime as dt
 import html
 import json
@@ -141,6 +142,18 @@ def first_token(stem: str) -> str:
     return ""
 
 
+NOISE = GENERIC_FIRST | {"mh", "hm", "edited", "pty", "ltd", "v", "final", "signed", "executed", "copy", "doc", "docx",
+                         "pdf", "version", "updated", "or", "all", "only", "to", "re", "x", "fy", "xu"}
+
+
+def name_tokens(name: str) -> set[str]:
+    return {w for w in re.findall(r"[a-z]+[a-z0-9]*", name.lower()) if len(w) >= 2 and w not in NOISE}
+
+
+def jaccard(a: set, b: set) -> float:
+    return len(a & b) / len(a | b) if a and b else 0.0
+
+
 def wanted_file(p: Path) -> bool:
     n = p.name
     return p.is_file() and not n.startswith((".", "~$")) and n.lower() not in IGNORE
@@ -158,7 +171,8 @@ def plan(roots: list[tuple[Path, str]]) -> list[dict]:
     exclude = DEFAULT_EXCLUDE | set(cfg.get("exclude", []))
     split = set(cfg.get("split", []))
     names = cfg.get("names", {})
-    skip = lambda p, d: p.name.startswith((".", "__MACOSX")) or d in exclude or p.name in exclude
+    skip = lambda p, d: (p.name.startswith((".", "__MACOSX")) or d in exclude or p.name in exclude
+                         or any(fnmatch.fnmatch(d, pat) for pat in exclude if "*" in pat))
     units: list[dict] = []  # {name, area, paths (display), src [(root, abs)], kind}
 
     def unit(root, p, area, kind):
@@ -212,16 +226,28 @@ def plan(roots: list[tuple[Path, str]]) -> list[dict]:
             join(gid, u)
         else:
             rest.append(u)
+    # Loose files: join a folder whose name the file name starts with (e.g. "Cloudinary contract.pdf" ->
+    # Suppliers/Cloudinary); otherwise cluster with other loose files only when their distinctive words largely
+    # match (versions and copies of the same document), so different athletes or contractors stay apart.
+    clusters: list[dict] = []
     for u in rest:
         key = norm(u["name"])
-        match = next((gid for gid in groups if len(gid) >= 4 and not gid.startswith("file:") and key.startswith(gid)), None)
-        label = u["name"]
-        if match is None:
-            tok = first_token(u["name"])
-            match = f"file:{tok}" if tok else f"file:{key}"
-            if tok:  # name loose-file groups after the vendor word, as written in the file name
-                label = next(w for w in re.findall(r"[A-Za-z0-9]+", u["name"]) if w.lower() == tok)
-        join(match, u, label)
+        match = next((gid for gid in groups if len(gid) >= 5 and not gid.startswith("file:") and gid not in GENERIC_FIRST
+                      and key.startswith(gid)), None)
+        if match:
+            join(match, u)
+            continue
+        toks = name_tokens(u["name"])
+        best = max(clusters, key=lambda c: jaccard(toks, c["toks"]), default=None)
+        if best and toks and jaccard(toks, best["toks"]) >= 0.6:
+            best["units"].append(u)
+            best["toks"] |= toks
+        else:
+            clusters.append({"toks": set(toks), "units": [u]})
+    for i, c in enumerate(clusters):
+        label = min((u["name"] for u in c["units"]), key=len)
+        for u in c["units"]:
+            join(f"file:{i}", u, label)
 
     manifest = []
     for g in groups.values():
