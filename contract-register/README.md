@@ -45,3 +45,24 @@ Expect roughly 5–40 pages per counterparty. At Opus 5.5 pricing a typical supp
 | Needs review | The renewal mechanism is unclear (the documents conflict, or renewal is set by online terms not on file) |
 | Due soon | The next deadline is within 4 months |
 | Active | Nothing due in the next 4 months |
+
+## Outputs
+
+| File | Use |
+|---|---|
+| `out/index.html` | Dashboard: overview, actions, calendar, contract detail |
+| `out/contracts.json` | The register with computed dates, actions, record checks |
+| `out/ap_contract_terms.json` | For the AP tool: per AP21 supplier code, the expected invoice amount, tolerance, payment terms, validity dates and hold reasons |
+| `out/contract-deadlines.ics` | Calendar file of every upcoming deadline, with 30-day and 7-day reminders |
+
+## Owners and manual follow-ups
+
+`data/overrides.json` holds the contract owner and any manual actions per contract:
+`{"slimstock": {"owner": "Name", "owner_status": "confirmed", "actions": [{"title": "...", "detail": "...", "due": "2026-11-30"}]}}`
+
+## AP integration
+
+`supabase_schema.sql` defines `contracts.contract`, `contracts.deadline`, `contracts.action` and the view
+`contracts.ap_expected`. It has not been applied. The AP tool joins each invoice to `ap_expected` on the AP21
+supplier code and flags: amount outside tolerance, invoice date outside the term, payment terms that differ,
+or any hold reason.

@@ -104,6 +104,102 @@ def derive(rec: dict, today: dt.date) -> dict:
     }
 
 
+ACTION_TITLE = {
+    "Cancel by": "Decide: cancel or let it renew",
+    "Extend by": "Decide: extend or let it lapse",
+    "Renegotiate by": "Start the renewal negotiation",
+    "Free exit closes": "Decide: keep it or use the free exit",
+    "Term ends": "Plan for the term ending",
+    "Confirm notice period": "Confirm the notice period",
+    "Confirm renewal terms": "Confirm the renewal terms",
+}
+PERIODS = {"month": 12, "quarter": 4, "semi": 2, "annual": 1, "year": 1}  # order matters: "semi" before "annual"
+
+
+def actions(rec: dict, manual: list[dict], today: dt.date) -> list[dict]:
+    """Action inbox: dated decisions from deadlines, high risks, and manual follow-ups."""
+    out = []
+    upcoming = [x for x in rec["computed"]["deadlines"] if x["days"] >= 0]
+    for dl in upcoming:
+        if dl["days"] > 180 or (dl["kind"] == "Term ends" and len(upcoming) > 1):
+            continue
+        out.append({"title": ACTION_TITLE.get(dl["kind"], dl["kind"]), "detail": dl["why"], "due": dl["date"],
+                    "days": dl["days"], "severity": "high" if dl["days"] <= 45 else "medium", "source": "deadline"})
+    # High risks become undated actions, unless a dated or manual action already covers them.
+    dated = [dt.date.fromisoformat(x["due"]).strftime("%-d %b %Y") for x in out]
+    covered = " ".join(a["detail"] for a in manual)
+    for r in rec.get("risks", []):
+        issue = r["issue"]
+        if r["severity"] != "high" or any(x in issue for x in dated):
+            continue
+        if any(tok in covered for tok in issue.split() if len(tok) > 8 and tok[0].isdigit()):
+            continue
+        title, _, rest = issue.partition(". ")
+        out.append({"title": title.rstrip("."), "detail": rest, "due": None, "days": None,
+                    "severity": "high", "source": "risk"})
+    for a in manual:
+        due = d(a.get("due"))
+        out.append({"title": a["title"], "detail": a.get("detail", ""), "due": a.get("due"),
+                    "days": (due - today).days if due else None, "severity": "high", "source": "manual"})
+    return out
+
+
+def health(rec: dict) -> dict:
+    """Record completeness: what a contract needs before finance can rely on it."""
+    c = rec["computed"]
+    checks = [
+        ("Signed copy on file", any(x["signed"] for x in rec["documents"])),
+        ("Renewal terms clear", rec["renewal_type"] != "unclear"),
+        ("Current term in date", c["status"] != "Term ended"),
+        ("Notice or end date known", bool(c["deadlines"]) or (rec["renewal_type"] == "evergreen" and rec.get("notice_period_days") is not None)),
+        ("Exit routes captured", bool(rec.get("exit_routes"))),
+        ("AP21 supplier linked", bool(rec.get("ap21_supplier_code"))),
+        ("Owner confirmed", bool(rec.get("owner")) and rec.get("owner_status") == "confirmed"),
+    ]
+    return {"score": sum(ok for _, ok in checks), "total": len(checks), "checks": [{"label": l, "ok": ok} for l, ok in checks]}
+
+
+def ap_terms(rec: dict) -> dict:
+    """What AP should expect on an invoice from this supplier, and when to hold it."""
+    c = rec["computed"]
+    bf = (rec.get("billing_frequency") or "").lower()
+    n = next((v for k, v in PERIODS.items() if k in bf), None)
+    expected = round(rec["annual_value"] / n, 2) if n and rec.get("annual_value") else None
+    variable = any(w in rec["fee_summary"].lower() for w in ("estimat", "consumption", "usage", "overage"))
+    holds = []
+    if c["status"] == "Term ended":
+        holds.append(f"Term ended {d(c['current_term_end']).strftime('%-d %b %Y')}: no contract on file covers later invoices")
+    if rec["renewal_type"] == "unclear" and c["status"] != "Term ended":
+        holds.append("No signed terms on file: confirm before approving increases")
+    if not rec.get("ap21_supplier_code"):
+        holds.append("No AP21 supplier record")
+    return {
+        "expected_invoice": expected, "currency": rec.get("currency"), "billing_frequency": rec.get("billing_frequency"),
+        "tolerance_pct": 20 if variable else 5, "variable": variable, "payment_terms": rec.get("payment_terms"),
+        "valid_from": c["current_term_start"], "valid_to": c["current_term_end"], "holds": holds,
+    }
+
+
+def write_ics(records: list[dict], path: Path) -> None:
+    lines = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//2XU//Contract Register//EN", "X-WR-CALNAME:2XU contract deadlines"]
+    for rec in records:
+        for dl in rec["computed"]["deadlines"]:
+            if dl["days"] < 0:
+                continue
+            day = dl["date"].replace("-", "")
+            nxt = (dt.date.fromisoformat(dl["date"]) + dt.timedelta(days=1)).strftime("%Y%m%d")
+            owner = rec.get("owner") or "Unassigned"
+            lines += ["BEGIN:VEVENT", f"UID:{rec['id']}-{day}-{dl['kind'].replace(' ', '')}@contract-register",
+                      f"DTSTAMP:{day}T000000Z", f"DTSTART;VALUE=DATE:{day}", f"DTEND;VALUE=DATE:{nxt}",
+                      f"SUMMARY:{rec['counterparty']}: {dl['kind']}",
+                      f"DESCRIPTION:{dl['why']}. Owner: {owner}.".replace(",", "\\,"),
+                      "BEGIN:VALARM", "ACTION:DISPLAY", "DESCRIPTION:Contract deadline in 30 days", "TRIGGER:-P30D", "END:VALARM",
+                      "BEGIN:VALARM", "ACTION:DISPLAY", "DESCRIPTION:Contract deadline in 7 days", "TRIGGER:-P7D", "END:VALARM",
+                      "END:VEVENT"]
+    lines.append("END:VCALENDAR")
+    path.write_text("\r\n".join(lines) + "\r\n")
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--today", default=dt.date.today().isoformat())
@@ -115,13 +211,21 @@ def main() -> None:
     codes_file = args.records.parent / "ap21_suppliers.json"
     codes = json.loads(codes_file.read_text()) if codes_file.exists() else {}
 
+    ov_file = args.records.parent / "overrides.json"
+    overrides = json.loads(ov_file.read_text()) if ov_file.exists() else {}
+
     records = []
     for f in sorted(args.records.glob("*.json")):
         rec = json.loads(f.read_text())
         if rec["id"] in codes:
             rec["ap21_supplier_code"] = codes[rec["id"]].get("code")
             rec["ap21_supplier_name"] = codes[rec["id"]].get("name")
+        ov = overrides.get(rec["id"], {})
+        rec["owner"], rec["owner_status"] = ov.get("owner"), ov.get("owner_status", "proposed")
         rec["computed"] = derive(rec, today)
+        rec["computed"]["actions"] = actions(rec, ov.get("actions", []), today)
+        rec["computed"]["health"] = health(rec)
+        rec["computed"]["ap"] = ap_terms(rec)
         records.append(rec)
 
     order = {"Term ended": 0, "Act now": 1, "Needs review": 2, "Due soon": 3, "Active": 4}
@@ -131,6 +235,12 @@ def main() -> None:
     payload = {"generated": today.isoformat(), "fx_to_aud": FX_TO_AUD, "contracts": records}
     args.out.mkdir(parents=True, exist_ok=True)
     (args.out / "contracts.json").write_text(json.dumps(payload, indent=2))
+
+    # Lookup for the AP tool: one row per supplier code, what an invoice should look like.
+    ap = [{"ap21_supplier_code": r.get("ap21_supplier_code"), "supplier": r["counterparty"], "contract_id": r["id"],
+           "status": r["computed"]["status"], **r["computed"]["ap"]} for r in records]
+    (args.out / "ap_contract_terms.json").write_text(json.dumps(ap, indent=2))
+    write_ics(records, args.out / "contract-deadlines.ics")
 
     template = (HERE / "template.html").read_text()
     data = json.dumps(payload).replace("</", "<\\/")

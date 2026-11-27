@@ -154,11 +154,13 @@ button{font:inherit;color:inherit}
 
 /* Table */
 .table-wrap{background:var(--surface);border-radius:var(--r-lg);box-shadow:var(--shadow);overflow-x:auto}
-table{width:100%;border-collapse:collapse;min-width:760px}
+table{width:100%;border-collapse:collapse;min-width:940px}
 th{font-size:11.5px;font-weight:600;color:var(--label-2);text-align:left;padding:9px 14px;border-bottom:1px solid var(--sep);background:var(--surface-2);white-space:nowrap;cursor:default;user-select:none}
 th[data-sort]:hover{color:var(--label)}
 th .arrow{color:var(--accent);margin-left:3px}
-td{padding:10px 14px;border-bottom:1px solid var(--sep);vertical-align:middle}
+td{padding:10px 14px;border-bottom:1px solid var(--sep);vertical-align:middle;font-size:13px}
+td .muted{display:block;font-size:11.5px}
+td.own{white-space:nowrap}
 tbody tr:last-child td{border-bottom:0}
 tbody tr{cursor:default}
 tbody tr:hover td{background:var(--fill-2)}
@@ -210,6 +212,12 @@ dl.kv > div + div{border-top:1px solid var(--sep)}
 .exit-cond{color:var(--label-2)}
 .exit-cost{font-size:12px;color:var(--label)}
 .exit-src{font-size:11.5px;color:var(--label-3)}
+.muted{color:var(--label-3);font-weight:400}
+.meter{display:inline-flex;gap:2px;vertical-align:-1px}
+.meter i{width:5px;height:12px;border-radius:2px;background:var(--fill)}
+.meter i.on{background:var(--green)}
+.tick{width:16px;height:16px;border-radius:50%;display:grid;place-items:center;font-size:10px;font-weight:700;flex:none;margin-top:1px;background:var(--red-soft);color:var(--red)}
+.tick.ok{background:var(--green-soft);color:var(--green)}
 .prov{font-size:11.5px;color:var(--label-3);padding:0 4px;line-height:1.5}
 .empty{padding:40px;text-align:center;color:var(--label-3)}
 
@@ -295,7 +303,6 @@ function needsAction(c) { return ['Act now', 'Term ended', 'Needs review'].inclu
 function filtered() {
   let list = contracts;
   if (state.category) list = list.filter(c => c.category === state.category);
-  if (state.view === 'action') list = list.filter(needsAction);
   if (state.q) {
     const q = state.q.toLowerCase();
     list = list.filter(c => [c.counterparty, c.counterparty_legal_entity, c.category, c.service_description, c.fee_summary, c.signed_for_2xu_by].join(' ').toLowerCase().includes(q));
@@ -305,11 +312,11 @@ function filtered() {
 
 /* ---------- sidebar ---------- */
 function renderNav() {
-  const actions = contracts.filter(needsAction).length;
+  const actions = contracts.reduce((n, c) => n + c.computed.actions.length, 0);
   const items = [
     ['overview', 'Overview', ICONS.overview, ''],
     ['all', 'All Contracts', ICONS.all, contracts.length],
-    ['action', 'Needs Action', ICONS.action, actions],
+    ['action', 'Actions', ICONS.action, actions],
     ['calendar', 'Renewal Calendar', ICONS.calendar, '']
   ];
   document.getElementById('nav-main').innerHTML = items.map(([id, label, icon, n]) =>
@@ -322,7 +329,7 @@ function renderNav() {
 
 /* ---------- views ---------- */
 function header(title, sub) {
-  const views = [['overview', 'Overview'], ['all', 'All'], ['action', 'Needs Action'], ['calendar', 'Calendar']];
+  const views = [['overview', 'Overview'], ['all', 'All'], ['action', 'Actions'], ['calendar', 'Calendar']];
   return `<div class="mobile-nav">${views.map(([v, l]) => `<button data-view="${v}" aria-pressed="${state.view === v}">${l}</button>`).join('')}</div>
   <div class="large-title"><div><h1>${esc(title)}</h1><p>${sub}</p></div></div>`;
 }
@@ -356,7 +363,7 @@ function viewOverview() {
   <div class="tiles">
     <div class="tile"><div class="k">Annual commitments</div><div class="v num">${audK(totalAud)}</div><div class="s">AUD equivalent, ex GST</div></div>
     <div class="tile ${in60 ? 'alert' : ''}"><div class="k">Deadlines in 60 days</div><div class="v num">${in60}</div><div class="s">notice, extension or exit</div></div>
-    <div class="tile"><div class="k">Auto-renewing</div><div class="v num">${auto}</div><div class="s">roll over unless cancelled</div></div>
+    <div class="tile"><div class="k">Open actions</div><div class="v num">${list.reduce((n, c) => n + c.computed.actions.length, 0)}</div><div class="s">${auto} contract${auto === 1 ? '' : 's'} auto-renew</div></div>
     <div class="tile ${review ? 'alert' : ''}"><div class="k">Term ended or unclear</div><div class="v num">${review}</div><div class="s">confirm what governs today</div></div>
   </div>
   <section class="section"><div class="section-head"><h3>Upcoming deadlines</h3><span>Next 13 months</span></div>
@@ -409,19 +416,21 @@ function viewTable(title, sub) {
   const list = [...filtered()].sort((a, b) => { const x = sortValue(a, state.sort.key), y = sortValue(b, state.sort.key); return (x > y ? 1 : x < y ? -1 : 0) * state.sort.dir; });
   const th = (key, label, cls = '') => `<th class="${cls}" data-sort="${key}" aria-sort="${state.sort.key === key ? (state.sort.dir > 0 ? 'ascending' : 'descending') : 'none'}">${label}${state.sort.key === key ? `<span class="arrow">${state.sort.dir > 0 ? '▲' : '▼'}</span>` : ''}</th>`;
   return header(title, sub) + `<div class="table-wrap"><table>
-    <thead><tr>${th('name', 'Counterparty')}<th>AP21 code</th>${th('status', 'Status')}<th>Renewal</th>${th('deadline', 'Next deadline')}${th('end', 'Term ends')}${th('value', 'Annual value', 'right')}</tr></thead>
+    <thead><tr>${th('name', 'Counterparty')}<th>Owner</th><th>AP21 code</th><th>Record</th>${th('status', 'Status')}<th>Renewal</th>${th('deadline', 'Next deadline')}${th('end', 'Term ends')}${th('value', 'Annual value', 'right')}</tr></thead>
     <tbody>${list.map(c => {
       const n = c.computed.next_deadline;
       return `<tr data-id="${c.id}" aria-current="${state.selected === c.id}" tabindex="0">
         <td class="cp"><b>${esc(c.counterparty)}</b><span>${esc(c.category)}</span></td>
+        <td class="own">${ownerLabel(c)}</td>
         <td>${c.ap21_supplier_code ? `<span class="code">${esc(c.ap21_supplier_code)}</span>` : pill('Not in AP21', 'orange')}</td>
+        <td>${meter(c)}</td>
         <td>${statusPill(c)}</td>
         <td>${esc(RENEWAL_LABEL[c.renewal_type])}</td>
         <td>${n ? `<span class="when ${urgency(n.days)} num">${fmtDate(n.date)}</span><div style="font-size:12px;color:var(--label-2)">${esc(n.kind)}</div>` : '<span style="color:var(--label-3)">—</span>'}</td>
         <td class="num">${fmtDate(c.computed.current_term_end)}</td>
         <td class="right num">${money(c.annual_value, c.currency)}${c.currency !== 'AUD' && c.computed.annual_value_aud ? `<div style="font-size:12px;color:var(--label-3)">≈ ${audK(c.computed.annual_value_aud)}</div>` : ''}</td>
       </tr>`;
-    }).join('') || '<tr><td colspan="7" class="empty">No contracts match</td></tr>'}</tbody></table></div>`;
+    }).join('') || '<tr><td colspan="9" class="empty">No contracts match</td></tr>'}</tbody></table></div>`;
 }
 
 function viewCalendar() {
@@ -441,7 +450,7 @@ function inspector(c) {
     : n ? `<div class="callout ${tone}"><div class="big num">${n.days}<small>DAYS</small></div><div><b>${esc(n.kind)} ${fmtDate(n.date)}</b><span>${esc(n.why)}</span></div></div>`
     : `<div class="callout gray"><div class="big">–</div><div><b>No dated action</b><span>Nothing in the documents forces a decision date.</span></div></div>`;
   const kv = rows => `<dl class="kv">${rows.filter(r => r[1] != null && r[1] !== '').map(([k, v]) => `<div><dt>${k}</dt><dd>${v}</dd></div>`).join('')}</dl>`;
-  return `<div class="insp-head"><div style="min-width:0"><h2>${esc(c.counterparty)}</h2><p>${esc(c.counterparty_legal_entity || '')}</p><div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap">${statusPill(c)}<span class="tag">${esc(c.category)}</span><span class="tag">${esc(RENEWAL_LABEL[c.renewal_type])}</span></div></div>
+  return `<div class="insp-head"><div style="min-width:0"><h2>${esc(c.counterparty)}</h2><p>${esc(c.counterparty_legal_entity || '')}</p><div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap">${statusPill(c)}<span class="tag">${esc(c.category)}</span><span class="tag">${esc(RENEWAL_LABEL[c.renewal_type])}</span></div><p style="margin-top:8px">Owner: ${ownerLabel(c)}</p></div>
     <button class="close" id="close" aria-label="Close details">${ICONS.close}</button></div>
   <div class="insp-body">
     ${callout}
@@ -455,7 +464,9 @@ function inspector(c) {
       ['Early exit', c.early_exit_summary ? `${esc(c.early_exit_summary)}${c.early_exit_deadline ? ` <b class="num">(by ${fmtDate(c.early_exit_deadline)})</b>` : ''}` : null],
       ...c.computed.deadlines.map(d => [esc(d.kind), `<span class="num" style="color:var(--${d.days < 0 ? 'label-3' : urgency(d.days) === 'gray' ? 'label' : urgency(d.days)})">${fmtDate(d.date)}</span> <span style="color:var(--label-3)">· ${relDays(d.days)}</span>`])
     ])}</div>
+    ${actionList(c)}
     ${exitRoutes(c)}
+    ${apCheck(c)}
     <div><div class="group-title">Commercials</div>${kv([
       ['AP21 supplier', c.ap21_supplier_code ? `<span class="code">${esc(c.ap21_supplier_code)}</span> ${esc(c.ap21_supplier_name || '')}` : '<span style="color:var(--orange)">No supplier record in AP21</span>'],
       ['Annual value', `<b class="num">${money(c.annual_value, c.currency)}</b>${c.currency !== 'AUD' && c.computed.annual_value_aud ? ` <span style="color:var(--label-3)">≈ ${audK(c.computed.annual_value_aud)}</span>` : ''}`],
@@ -468,6 +479,7 @@ function inspector(c) {
     ])}</div>
     ${c.risks.length ? `<div><div class="group-title">Risks</div><div class="kv">${c.risks.map(r => `<div class="risk"><span class="sev ${r.severity}" title="${r.severity}"></span><span>${esc(r.issue)}</span></div>`).join('')}</div></div>` : ''}
     ${c.open_questions.length ? `<div><div class="group-title">To confirm</div><div class="kv">${c.open_questions.map(q => `<div class="risk"><span class="sev low"></span><span>${esc(q)}</span></div>`).join('')}</div></div>` : ''}
+    ${healthChecks(c)}
     <div><div class="group-title">Evidence</div><div class="kv">${c.evidence.map(e => `<div class="q"><blockquote>${esc(e.quote)}</blockquote><span>${esc(e.field.replace(/_/g, ' '))} · ${esc(e.file_name)}${e.page ? ` · p.${e.page}` : ''}</span></div>`).join('')}</div></div>
     <div><div class="group-title">Documents</div><div class="kv">${c.documents.map(d => `<div class="doc">${ICONS.pdf}<div class="n">${esc(d.file_name)}<small>${esc(d.doc_type.replace(/_/g, ' '))}${d.document_date ? ' · ' + fmtDate(d.document_date) : ''}</small></div>${d.signed ? pill('Signed', 'green') : pill('Unsigned', 'gray')}</div>`).join('')}</div></div>
     <div class="prov">${esc(c.extracted_by)} · confidence ${esc(c.confidence)}${c.computed.computed_notes.length ? '<br>' + c.computed.computed_notes.map(esc).join('<br>') : ''}<br>Folder: Accounts/Contracts/Suppliers/${esc(c.source_folder)}</div>
@@ -489,14 +501,54 @@ function exitRoutes(c) {
     <div class="exit-src">${esc(r.source)}</div></div>`).join('')}</div></div>`;
 }
 
+const ownerLabel = c => c.owner ? `${esc(c.owner)}${c.owner_status === 'confirmed' ? '' : ' <span class="muted">(proposed)</span>'}` : '<span style="color:var(--orange);font-weight:500">Unassigned</span>';
+const meter = c => { const h = c.computed.health; return `<span class="meter" title="${h.score} of ${h.total} record checks passed">${h.checks.map(x => `<i class="${x.ok ? 'on' : ''}"></i>`).join('')}</span> <span class="muted num">${h.score}/${h.total}</span>`; };
+
+function actionRow(c, a, showContract) {
+  const dt = a.due ? pd(a.due) : null;
+  const tone = a.days == null ? 'red' : urgency(a.days);
+  return `<button class="row" data-id="${c.id}">
+    <div class="date-chip">${dt ? `<div class="m" style="color:var(--${tone === 'gray' ? 'label-3' : tone})">${dt.toLocaleDateString('en-AU', { month: 'short' })}</div><div class="dd num">${dt.getDate()}</div><div class="y num">${dt.getFullYear()}</div>` : `<div class="m" style="color:var(--red)">Open</div><div class="dd">!</div><div class="y">no date</div>`}</div>
+    <div style="min-width:0"><div class="t">${esc(a.title)}${showContract ? ` <span class="tag">${esc(c.counterparty)}</span>` : ''}</div><div class="d">${esc(a.detail)}</div></div>
+    <div class="r"><span class="when ${tone} num">${a.days == null ? 'Now' : relDays(a.days)}</span><span class="tag">${c.owner ? esc(c.owner) : 'Unassigned'}</span></div>
+  </button>`;
+}
+function viewActions() {
+  const acts = [];
+  for (const c of filtered()) for (const a of c.computed.actions) acts.push({ c, a });
+  acts.sort((x, y) => (x.a.days ?? -1) - (y.a.days ?? -1));
+  const groups = [['Do now', acts.filter(x => x.a.days == null || x.a.days <= 7)], ['Next 45 days', acts.filter(x => x.a.days > 7 && x.a.days <= 45)], ['Later', acts.filter(x => x.a.days > 45)]];
+  return header('Actions', 'Decisions and follow-ups across all contracts, each with an owner and a date.') +
+    groups.filter(g => g[1].length).map(([t, xs]) => `<section class="section"><div class="section-head"><h3>${t}</h3><span>${xs.length}</span></div><div class="list">${xs.map(x => actionRow(x.c, x.a, true)).join('')}</div></section>`).join('') || '<div class="empty">Nothing open</div>';
+}
+function actionList(c) {
+  const a = c.computed.actions; if (!a.length) return '';
+  return `<div><div class="group-title">Actions</div><div class="kv">${a.map(x => `<div class="exit"><div class="exit-head"><b>${esc(x.title)}</b>${pill(x.days == null ? 'Now' : fmtDate(x.due), x.days == null || x.days <= 45 ? 'red' : 'orange')}</div><div class="exit-cond">${esc(x.detail)}</div></div>`).join('')}</div></div>`;
+}
+function apCheck(c) {
+  const ap = c.computed.ap;
+  const rows = [
+    ['Expected invoice', ap.expected_invoice != null ? `<b class="num">${money(ap.expected_invoice, ap.currency)}</b> <span class="muted">ex tax, ${esc((ap.billing_frequency || '').toLowerCase())}</span>` : '<span class="muted">Not derivable from the contract</span>'],
+    ['Tolerance', `±${ap.tolerance_pct}%${ap.variable ? ' <span class="muted">(usage-based fees)</span>' : ''}`],
+    ['Payment terms', esc(ap.payment_terms || '—')],
+    ['Valid for invoices', ap.valid_from ? `${fmtDate(ap.valid_from)} – ${ap.valid_to ? fmtDate(ap.valid_to) : 'open'}` : '—'],
+    ['AP hold', ap.holds.length ? ap.holds.map(h => `<span style="color:var(--red)">${esc(h)}</span>`).join('<br>') : '<span style="color:var(--green)">None</span>']
+  ];
+  return `<div><div class="group-title">AP invoice check</div><dl class="kv">${rows.map(([k, v]) => `<div><dt>${k}</dt><dd>${v}</dd></div>`).join('')}</dl></div>`;
+}
+function healthChecks(c) {
+  const h = c.computed.health;
+  return `<div><div class="group-title">Record checks · ${h.score}/${h.total}</div><div class="kv">${h.checks.map(x => `<div class="risk"><span class="tick ${x.ok ? 'ok' : ''}">${x.ok ? '✓' : '✕'}</span><span>${esc(x.label)}</span></div>`).join('')}</div></div>`;
+}
+
 /* ---------- render ---------- */
 function render() {
   renderNav();
-  const titles = { overview: 'Overview', all: 'All Contracts', action: 'Needs Action', calendar: 'Renewal Calendar' };
+  const titles = { overview: 'Overview', all: 'All Contracts', action: 'Actions', calendar: 'Renewal Calendar' };
   let html;
   if (state.view === 'overview') html = viewOverview();
   else if (state.view === 'calendar') html = viewCalendar();
-  else if (state.view === 'action') html = viewTable('Needs Action', 'Deadlines inside 45 days, ended terms, unclear renewals and high risks.');
+  else if (state.view === 'action') html = viewActions();
   else html = viewTable(state.category || 'All Contracts', 'Sorted by the next date someone has to act on. Click a column to re-sort.');
   document.getElementById('content').innerHTML = html;
   document.getElementById('toolbar-title').textContent = state.category || titles[state.view];
