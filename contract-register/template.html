@@ -228,6 +228,8 @@ dl.kv > div + div{border-top:1px solid var(--sep)}
 .save-note{font-size:12px;color:var(--label-2)}
 .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
 @media (max-width:760px){.admin-row{grid-template-columns:minmax(0,1fr) auto}.admin-row>div:first-child,.save-note{grid-column:1/-1}}
+.terms table{min-width:1500px}.terms td{vertical-align:top;font-size:12.5px;line-height:1.4}.terms td .clip{display:-webkit-box;-webkit-line-clamp:5;-webkit-box-orient:vertical;overflow:hidden;max-width:260px}.terms td.cp{min-width:150px}
+.doc .n small i{font-style:normal;color:var(--label-2)}
 .prov{font-size:11.5px;color:var(--label-3);padding:0 4px;line-height:1.5}
 .empty{padding:40px;text-align:center;color:var(--label-3)}
 
@@ -316,7 +318,7 @@ function filtered() {
   if (state.category) list = list.filter(c => c.category === state.category);
   if (state.q) {
     const q = state.q.toLowerCase();
-    list = list.filter(c => [c.counterparty, c.counterparty_legal_entity, c.category, c.service_description, c.fee_summary, c.signed_for_2xu_by].join(' ').toLowerCase().includes(q));
+    list = list.filter(c => [c.counterparty, c.counterparty_legal_entity, c.category, c.area, c.counterparty_role, c.service_description, c.fee_summary, c.signed_for_2xu_by, c.governing_law].join(' ').toLowerCase().includes(q));
   }
   return list;
 }
@@ -329,6 +331,7 @@ function renderNav() {
     ['all', 'All Contracts', ICONS.all, contracts.length],
     ['action', 'Actions', ICONS.action, actions],
     ['calendar', 'Renewal Calendar', ICONS.calendar, ''],
+    ['terms', 'Term Comparison', ICONS.all, ''],
     ['admin', 'Admin', ICONS.admin, '']
   ];
   document.getElementById('nav-main').innerHTML = items.map(([id, label, icon, n]) =>
@@ -336,12 +339,12 @@ function renderNav() {
   const cats = [...new Set(contracts.map(c => c.category))].sort();
   document.getElementById('nav-cat').innerHTML = '<div class="side-title">Categories</div>' + cats.map(cat =>
     `<button class="side-item" data-cat="${esc(cat)}" aria-current="${state.category === cat}">${ICONS.folder}<span>${esc(cat)}</span><span class="count">${contracts.filter(c => c.category === cat).length}</span></button>`).join('');
-  document.getElementById('side-foot').innerHTML = `Data as at ${fmtDate(DATA.generated)}<br>${contracts.length} counterparties · pilot`;
+  document.getElementById('side-foot').innerHTML = `Data as at ${fmtDate(DATA.generated)}<br>${contracts.length} counterparties`;
 }
 
 /* ---------- views ---------- */
 function header(title, sub) {
-  const views = [['overview', 'Overview'], ['all', 'All'], ['action', 'Actions'], ['calendar', 'Calendar'], ['admin', 'Admin']];
+  const views = [['overview', 'Overview'], ['all', 'All'], ['action', 'Actions'], ['calendar', 'Calendar'], ['terms', 'Terms'], ['admin', 'Admin']];
   return `<div class="mobile-nav">${views.map(([v, l]) => `<button data-view="${v}" aria-pressed="${state.view === v}">${l}</button>`).join('')}</div>
   <div class="large-title"><div><h1>${esc(title)}</h1><p>${sub}</p></div></div>`;
 }
@@ -364,16 +367,18 @@ function deadlineRow({ c, d }) {
 
 function viewOverview() {
   const list = filtered();
-  const totalAud = list.reduce((s, c) => s + (c.computed.annual_value_aud || 0), 0);
+  const pays = c => !c.money_direction || c.money_direction === '2XU pays' || c.money_direction === 'both';
+  const totalAud = list.filter(pays).reduce((s, c) => s + (c.computed.annual_value_aud || 0), 0);
+  const recvAud = list.filter(c => c.money_direction === '2XU receives').reduce((s, c) => s + (c.computed.annual_value_aud || 0), 0);
   const in60 = list.filter(c => c.computed.next_deadline && c.computed.next_deadline.days <= 60).length;
   const auto = list.filter(c => c.renewal_type === 'auto_renew').length;
   const review = list.filter(c => ['Term ended', 'Needs review'].includes(c.computed.status)).length;
   const dl = upcomingDeadlines(list).filter(x => x.d.days >= 0).slice(0, 8);
   const lapsed = list.filter(c => c.computed.status === 'Term ended');
   return header(state.category || 'Overview', `Renewal and notice dates across ${list.length} contracts, worked out from the signed documents.`) +
-  `<div class="pilot-banner">${ICONS.info}<div><b>Pilot.</b> ${contracts.length} supplier contracts from <span class="num">Accounts/Contracts/Suppliers</span>, matched to AP21 supplier codes. Every date, fee and exit clause links back to a quote in the source document; open a contract to see them.</div></div>
+  `<div class="pilot-banner">${ICONS.info}<div>${contracts.length} counterparties from <span class="num">Accounts/Contracts</span>: each record combines the agreement, MSA, SOWs, amendments, side letters and the online terms they incorporate. Every date, fee and exit clause links back to a quote in the source document; open a contract to see them.</div></div>
   <div class="tiles">
-    <div class="tile"><div class="k">Annual commitments</div><div class="v num">${audK(totalAud)}</div><div class="s">AUD equivalent, ex GST</div></div>
+    <div class="tile"><div class="k">Annual commitments</div><div class="v num">${audK(totalAud)}</div><div class="s">2XU pays, AUD ex GST${recvAud ? ` · ${audK(recvAud)} receivable` : ''}</div></div>
     <div class="tile ${in60 ? 'alert' : ''}"><div class="k">Deadlines in 60 days</div><div class="v num">${in60}</div><div class="s">notice, extension or exit</div></div>
     <div class="tile"><div class="k">Open actions</div><div class="v num">${list.reduce((n, c) => n + c.computed.actions.length, 0)}</div><div class="s">${auto} contract${auto === 1 ? '' : 's'} auto-renew</div></div>
     <div class="tile ${review ? 'alert' : ''}"><div class="k">Term ended or unclear</div><div class="v num">${review}</div><div class="s">confirm what governs today</div></div>
@@ -445,6 +450,31 @@ function viewTable(title, sub) {
     }).join('') || '<tr><td colspan="9" class="empty">No contracts match</td></tr>'}</tbody></table></div>`;
 }
 
+const clip = (v, empty = '—') => v == null || v === '' ? `<span class="muted">${empty}</span>` : `<div class="clip" title="${esc(v)}">${esc(v)}</div>`;
+function exitSummary(c) {
+  const r = c.exit_routes.filter(x => ['convenience', 'early_exit_window', 'let_expire'].includes(x.route));
+  return r.length ? r.map(x => `${ROUTE_LABEL[x.route]}: ${/^none\b/i.test(x.notice) ? 'no notice needed' : x.notice}`).join(' · ') : (c.termination_for_convenience || null);
+}
+function viewTerms() {
+  const list = [...filtered()].sort((a, b) => a.counterparty.localeCompare(b.counterparty));
+  return header('Term Comparison', 'The key terms of every agreement side by side. Hover a cell for the full text; click a row for the clauses and quotes.') +
+  `<div class="table-wrap terms"><table><thead><tr><th>Counterparty</th><th>Term &amp; renewal</th><th>Notice</th><th>How 2XU can exit</th><th>They can terminate</th><th>Payment</th><th>Price &amp; terms changes</th><th>Minimum commitment</th><th>Liability cap</th><th>Assignment / change of control</th><th>Governing law</th><th>Gaps</th></tr></thead>
+  <tbody>${list.map(c => `<tr data-id="${c.id}" aria-current="${state.selected === c.id}" tabindex="0">
+    <td class="cp"><b>${esc(c.counterparty)}</b><span>${esc(c.category)}${c.money_direction && c.money_direction !== '2XU pays' ? ' · ' + esc(c.money_direction) : ''}</span></td>
+    <td>${clip(`${RENEWAL_LABEL[c.renewal_type]}. ${c.computed.current_term_end ? 'Current term to ' + fmtDate(c.computed.current_term_end) + '. ' : ''}${c.notice_clause_summary || ''}`)}</td>
+    <td>${c.notice_period_days != null ? `<b class="num">${c.notice_period_days} days</b>` : '<span style="color:var(--orange)">Not stated</span>'}${c.notice_method ? clip(c.notice_method) : ''}</td>
+    <td>${clip(exitSummary(c))}</td>
+    <td>${clip(c.termination_by_counterparty)}</td>
+    <td>${c.payment_days != null ? `<b class="num">${c.payment_days === 0 ? 'On receipt' : c.payment_days + ' days'}</b>` : ''}${clip([c.billing_frequency, c.payment_terms].filter(Boolean).join(' · ') || null)}</td>
+    <td>${clip([c.unilateral_change_rights, c.price_change_on_renewal].filter(Boolean).join(' · ') || null)}</td>
+    <td>${clip(c.minimum_commitment || c.lock_in_or_exit_costs)}</td>
+    <td>${clip(c.liability_cap)}</td>
+    <td>${clip(c.assignment_and_change_of_control)}</td>
+    <td>${clip(c.governing_law)}</td>
+    <td>${(c.missing_documents || []).length ? pill((c.missing_documents.length) + ' missing', 'orange') : ''}${c.documents.some(d => d.signed) ? '' : ' ' + pill('No signed copy', 'red')}</td>
+  </tr>`).join('') || '<tr><td colspan="12" class="empty">No contracts match</td></tr>'}</tbody></table></div>`;
+}
+
 function viewCalendar() {
   const all = upcomingDeadlines(filtered(), 800);
   const byMonth = {};
@@ -461,7 +491,8 @@ function inspector(c) {
     ? `<div class="callout red"><div class="big">!<small>ENDED</small></div><div><b>Term ended ${fmtDate(c.computed.current_term_end)}</b><span>No newer signed document on file. Confirm what governs today.</span></div></div>`
     : n ? `<div class="callout ${tone}"><div class="big num">${n.days}<small>DAYS</small></div><div><b>${esc(n.kind)} ${fmtDate(n.date)}</b><span>${esc(n.why)}</span></div></div>`
     : `<div class="callout gray"><div class="big">–</div><div><b>No dated action</b><span>Nothing in the documents forces a decision date.</span></div></div>`;
-  const kv = rows => `<dl class="kv">${rows.filter(r => r[1] != null && r[1] !== '').map(([k, v]) => `<div><dt>${k}</dt><dd>${v}</dd></div>`).join('')}</dl>`;
+  const kv = rows => { const r = rows.filter(r => r[1] != null && r[1] !== ''); return r.length ? `<dl class="kv">${r.map(([k, v]) => `<div><dt>${k}</dt><dd>${v}</dd></div>`).join('')}</dl>` : ''; };
+  const group = (title, body) => body ? `<div><div class="group-title">${title}</div>${body}</div>` : '';
   return `<div class="insp-head"><div style="min-width:0"><h2>${esc(c.counterparty)}</h2><p>${esc(c.counterparty_legal_entity || '')}</p><div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap">${statusPill(c)}<span class="tag">${esc(c.category)}</span><span class="tag">${esc(RENEWAL_LABEL[c.renewal_type])}</span></div><p style="margin-top:8px">Owner: ${ownerLabel(c)}</p></div>
     <button class="close" id="close" aria-label="Close details">${ICONS.close}</button></div>
   <div class="insp-body">
@@ -489,12 +520,36 @@ function inspector(c) {
       ['Lock-in / exit', esc(c.lock_in_or_exit_costs)],
       ['Online terms', c.incorporated_online_terms ? (c.incorporated_online_terms.startsWith('http') ? `<a href="${esc(c.incorporated_online_terms)}" target="_blank" rel="noopener" style="color:var(--accent)">${esc(c.incorporated_online_terms.replace(/^https?:\/\//, ''))}</a>` : esc(c.incorporated_online_terms)) : null]
     ])}</div>
+    ${group('Key terms', kv([
+      ['Payment due', c.payment_days != null ? (c.payment_days === 0 ? 'On receipt / in advance' : `${c.payment_days} days from invoice`) : null],
+      ['Minimum commitment', esc(c.minimum_commitment)],
+      ['Late payment', esc(c.late_payment)],
+      ['Changes they can make', esc(c.unilateral_change_rights)],
+      ['How to amend', esc(c.variation_clause)],
+      ['They can terminate', esc(c.termination_by_counterparty)],
+      ['Notices', esc(c.notice_method)],
+      ['After termination', esc(c.post_termination)],
+      ['Liability cap', esc(c.liability_cap)],
+      ['Indemnities', esc(c.indemnities)],
+      ['Assignment / control', esc(c.assignment_and_change_of_control)],
+      ['Exclusivity, restraints', esc(c.exclusivity_and_restrictions)],
+      ['Service levels', esc(c.service_levels)],
+      ['IP', esc(c.ip_ownership)],
+      ['Data & privacy', esc(c.data_and_privacy)],
+      ['Confidentiality', esc(c.confidentiality)],
+      ['Insurance', esc(c.insurance)],
+      ['Governing law', esc(c.governing_law)],
+      ['Document precedence', esc(c.document_precedence)],
+      ...(c.other_key_terms || []).map(t => ['Also', esc(t)])
+    ]))}
+    ${(c.online_terms_used || []).length ? `<div><div class="group-title">Online terms relied on</div><div class="kv">${c.online_terms_used.map(t => `<div class="doc"><div class="n"><a href="${esc(t.url)}" target="_blank" rel="noopener" style="color:var(--accent)">${esc(t.title || t.url.replace(/^https?:\/\//, ''))}</a><small>${t.retrieved_on ? 'Current version, fetched ' + fmtDate(t.retrieved_on) + '. May differ from the version in force when 2XU signed.' : 'Could not be fetched'} · used for ${esc(t.used_for)}</small></div></div>`).join('')}</div></div>` : ''}
+    ${(c.missing_documents || []).length ? `<div><div class="group-title">Referred to but not on file</div><div class="kv">${c.missing_documents.map(m => `<div class="risk"><span class="sev medium"></span><span>${esc(m)}</span></div>`).join('')}</div></div>` : ''}
     ${c.risks.length ? `<div><div class="group-title">Risks</div><div class="kv">${c.risks.map(r => `<div class="risk"><span class="sev ${r.severity}" title="${r.severity}"></span><span>${esc(r.issue)}</span></div>`).join('')}</div></div>` : ''}
     ${c.open_questions.length ? `<div><div class="group-title">To confirm</div><div class="kv">${c.open_questions.map(q => `<div class="risk"><span class="sev low"></span><span>${esc(q)}</span></div>`).join('')}</div></div>` : ''}
     ${healthChecks(c)}
     <div><div class="group-title">Evidence</div><div class="kv">${c.evidence.map(e => `<div class="q"><blockquote>${esc(e.quote)}</blockquote><span>${esc(e.field.replace(/_/g, ' '))} · ${esc(e.file_name)}${e.page ? ` · p.${e.page}` : ''}</span></div>`).join('')}</div></div>
-    <div><div class="group-title">Documents</div><div class="kv">${c.documents.map(d => `<div class="doc">${ICONS.pdf}<div class="n">${esc(d.file_name)}<small>${esc(d.doc_type.replace(/_/g, ' '))}${d.document_date ? ' · ' + fmtDate(d.document_date) : ''}</small></div>${d.signed ? pill('Signed', 'green') : pill('Unsigned', 'gray')}</div>`).join('')}</div></div>
-    <div class="prov">${esc(c.extracted_by)} · confidence ${esc(c.confidence)}${c.computed.computed_notes.length ? '<br>' + c.computed.computed_notes.map(esc).join('<br>') : ''}<br>Folder: Accounts/Contracts/Suppliers/${esc(c.source_folder)}</div>
+    <div><div class="group-title">Documents</div><div class="kv">${c.documents.map(d => `<div class="doc">${ICONS.pdf}<div class="n">${esc(d.file_name)}<small>${esc(d.doc_type.replace(/_/g, ' '))}${d.document_date ? ' · ' + fmtDate(d.document_date) : ''}${d.status && d.status !== 'governing' ? ' · <i>' + esc(d.status) + '</i>' : ''}${d.location ? ' · ' + esc(d.location) : ''}${d.summary ? '<br>' + esc(d.summary) : ''}</small></div>${d.signed ? pill('Signed', 'green') : pill('Unsigned', 'gray')}</div>`).join('')}</div></div>
+    <div class="prov">${esc(c.extracted_by)} · confidence ${esc(c.confidence)}${c.computed.computed_notes.length ? '<br>' + c.computed.computed_notes.map(esc).join('<br>') : ''}<br>Filed in: ${(c.source_paths && c.source_paths.length ? c.source_paths.map(esc) : ['Accounts/Contracts/Suppliers/' + esc(c.source_folder)]).join('; ')}${(c.skipped_files || []).length ? '<br>Not read (format): ' + c.skipped_files.map(esc).join(', ') : ''}${(c.online_terms_fetched || []).length ? '<br>Online terms saved: ' + c.online_terms_fetched.map(t => esc(t.saved_as)).join(', ') : ''}</div>
   </div>`;
 }
 
@@ -596,12 +651,13 @@ function applyOwners(docs) {
 /* ---------- render ---------- */
 function render() {
   renderNav();
-  const titles = { overview: 'Overview', all: 'All Contracts', action: 'Actions', calendar: 'Renewal Calendar', admin: 'Admin' };
+  const titles = { overview: 'Overview', all: 'All Contracts', action: 'Actions', calendar: 'Renewal Calendar', terms: 'Term Comparison', admin: 'Admin' };
   let html;
   if (state.view === 'overview') html = viewOverview();
   else if (state.view === 'calendar') html = viewCalendar();
   else if (state.view === 'action') html = viewActions();
   else if (state.view === 'admin') html = viewAdmin();
+  else if (state.view === 'terms') html = viewTerms();
   else html = viewTable(state.category || 'All Contracts', 'Sorted by the next date someone has to act on. Click a column to re-sort.');
   document.getElementById('content').innerHTML = html;
   document.getElementById('toolbar-title').textContent = state.category || titles[state.view];
