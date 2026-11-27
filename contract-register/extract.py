@@ -303,14 +303,20 @@ def load_activity() -> list[dict]:
 
 
 def match_activity(entry: dict, activity: list[dict]) -> dict | None:
+    """Match by AP21 code only when the names also share a word (supplier and customer codes can collide),
+    otherwise by name: exact first, then the longest name that one starts with the other (5+ letters)."""
     text = " ".join(entry["paths"] + [f["title"] for f in entry["files"]]).upper()
     codes = set(CODE_RE.findall(text))
-    key, tok = norm(entry["name"]), first_token(entry["name"])
-    hits = [a for a in activity if codes & a["codes"]]
+    key, words = norm(entry["name"]), name_tokens(entry["name"] + " " + " ".join(entry["paths"]))
+    hits = [a for a in activity if codes & a["codes"] and words & name_tokens(a["name"])]
     if not hits:
-        hits = [a for a in activity if a["key"] and (a["key"] == key or (min(len(a["key"]), len(key)) >= 5 and (a["key"].startswith(key) or key.startswith(a["key"]))))]
-    if not hits and len(tok) >= 4:
-        hits = [a for a in activity if a["tok"] == tok]
+        hits = [a for a in activity if a["key"] == key]
+    if not hits:
+        pref = [a for a in activity if a["key"] and min(len(a["key"]), len(key)) >= 5
+                and (a["key"].startswith(key) or key.startswith(a["key"]))]
+        if pref:
+            longest = max(len(a["key"]) for a in pref)
+            hits = [a for a in pref if len(a["key"]) == longest]
     if not hits:
         return None
     best = max(hits, key=lambda a: a["last_date"])
@@ -327,7 +333,8 @@ def triage(manifest: list[dict]) -> None:
     for m in manifest:
         act = match_activity(m, activity) if activity else None
         m["activity"] = act
-        recent_doc = any(recent_year.search(f["title"]) for f in m["files"])
+        # Dates in file or folder names, ignoring the download folder's own name (e.g. "OneDrive_1_27-11-2026").
+        recent_doc = any(recent_year.search(f["title"].split("/", 1)[-1]) for f in m["files"])
         if act and act["last_date"] >= cutoff:
             m["status"] = "active"
         elif recent_doc:
